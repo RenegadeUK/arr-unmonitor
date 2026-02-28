@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
@@ -252,8 +253,8 @@ def create_app() -> Flask:
 
     @app.post("/run-now")
     def run_now():
-        poller.run_once()
-        return redirect(url_for("index"))
+        threading.Thread(target=poller.run_once, daemon=True).start()
+        return redirect(url_for("index", notice="Manual run started"))
 
     @app.post("/clear-history")
     def clear_history():

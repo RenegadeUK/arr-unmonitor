@@ -43,6 +43,7 @@ class ArrPoller:
         self.default_sonarr_url = default_sonarr_url
         self.default_sonarr_api_key = default_sonarr_api_key
         self.stats = PollStats()
+        self._run_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -59,7 +60,12 @@ class ArrPoller:
             self._thread.join(timeout=2)
 
     def run_once(self) -> None:
+        if not self._run_lock.acquire(blocking=False):
+            return
+
         started_at = time.time()
+        radarr_count = 0
+        sonarr_count = 0
         settings = self.settings_store.load()
         radarr_client = self._radarr_client(settings)
         sonarr_client = self._sonarr_client(settings)
@@ -73,33 +79,32 @@ class ArrPoller:
         if not sonarr_ok:
             service_errors.append(f"Sonarr: {sonarr_message}")
 
-        if not settings.enabled:
-            self.stats.last_error = ""
-            self.stats.last_run = started_at
-            self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
-            self._record_run(started_at, 0, 0, "disabled")
-            return
-
         try:
-            radarr_count, radarr_profile_error = self._process_radarr(settings, radarr_client, radarr_ok)
-            sonarr_count, sonarr_profile_error = self._process_sonarr(settings, sonarr_client, sonarr_ok)
-            self.stats.last_unmonitored = {
-                "radarr": radarr_count,
-                "sonarr": sonarr_count,
-            }
-            if radarr_profile_error:
-                service_errors.append(f"Radarr: {radarr_profile_error}")
-            if sonarr_profile_error:
-                service_errors.append(f"Sonarr: {sonarr_profile_error}")
-            self.stats.last_error = " | ".join(service_errors)
+            if not settings.enabled:
+                self.stats.last_error = ""
+                self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
+            else:
+                radarr_count, radarr_profile_error = self._process_radarr(settings, radarr_client, radarr_ok)
+                sonarr_count, sonarr_profile_error = self._process_sonarr(settings, sonarr_client, sonarr_ok)
+                self.stats.last_unmonitored = {
+                    "radarr": radarr_count,
+                    "sonarr": sonarr_count,
+                }
+                if radarr_profile_error:
+                    service_errors.append(f"Radarr: {radarr_profile_error}")
+                if sonarr_profile_error:
+                    service_errors.append(f"Sonarr: {sonarr_profile_error}")
+                self.stats.last_error = " | ".join(service_errors)
         except ArrClientError as exc:
-            radarr_count = 0
-            sonarr_count = 0
             self.stats.last_error = str(exc)
+            self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
+        except Exception as exc:
+            self.stats.last_error = f"Unexpected error: {exc}"
             self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
         finally:
             self.stats.last_run = time.time()
             self._record_run(started_at, radarr_count, sonarr_count, self.stats.last_error)
+            self._run_lock.release()
 
     def _record_run(
         self,
