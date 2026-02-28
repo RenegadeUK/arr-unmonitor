@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ARR Unmonitor</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.svg') }}" />
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #1f2329; color: #e5e7eb; }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+      .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+      .tile { background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; padding: 1rem; }
+      .tile h2 { margin: 0 0 1rem 0; font-size: 1.1rem; }
+      .row { margin-bottom: 0.85rem; }
+      label { display: block; margin-bottom: 0.35rem; font-weight: bold; color: #d1d5db; }
+      select, input[type='number'], input[type='text'], input[type='password'] {
+        width: 100%; padding: 0.5rem; background: #1f2329; color: #e5e7eb; border: 1px solid #4b5563; border-radius: 6px;
+      }
+      .actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+      button { padding: 0.5rem 0.8rem; cursor: pointer; border: 1px solid #4b5563; border-radius: 6px; background: #374151; color: #e5e7eb; }
+      button:hover { background: #4b5563; }
+      .status { background: #262b33; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #3a404a; }
+      .error { color: #fca5a5; }
+      .notice { color: #86efac; }
+      .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: bold; }
+      .badge-ok { background: #14532d; color: #bbf7d0; }
+      .badge-bad { background: #7f1d1d; color: #fecaca; }
+      .badge-unknown { background: #3f3f46; color: #d4d4d8; }
+      table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+      th, td { border: 1px solid #3a404a; padding: 0.45rem; text-align: left; }
+      th { background: #262b33; }
+      a { color: #93c5fd; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>ARR Unmonitor</h1>
+
+      <div class="status">
+        <p><strong>Last poll:</strong> {{ last_run }}</p>
+        <p><strong>Last unmonitored:</strong> Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</p>
+        <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
+        {% if stats.last_error %}
+        <p class="error"><strong>Last error:</strong> {{ stats.last_error }}</p>
+        {% endif %}
+        {% if profile_error %}
+        <p class="error"><strong>Profile load error:</strong> {{ profile_error }}</p>
+        {% endif %}
+        {% if notice %}
+        <p class="notice"><strong>Notice:</strong> {{ notice }}</p>
+        {% endif %}
+        {% if error %}
+        <p class="error"><strong>Error:</strong> {{ error }}</p>
+        {% endif %}
+      </div>
+
+      <div class="tiles">
+        <div class="tile">
+          <h2>
+            Radarr
+            <span id="radarr-badge" class="badge badge-unknown">Unknown</span>
+          </h2>
+          <form method="post" action="/settings/radarr">
+            <div class="row">
+              <label for="radarr_url">Radarr URL</label>
+              <input id="radarr_url" type="text" name="radarr_url" value="{{ settings.radarr_url }}" />
+            </div>
+            <div class="row">
+              <label for="radarr_api_key">Radarr API key</label>
+              <input id="radarr_api_key" type="password" name="radarr_api_key" value="{{ settings.radarr_api_key }}" />
+            </div>
+            <div class="row">
+              <label for="radarr_target_quality">Stop at quality text (example: Remux-2160p)</label>
+              <input id="radarr_target_quality" type="text" name="radarr_target_quality" value="{{ settings.radarr_target_quality }}" />
+            </div>
+            <div class="row">
+              <label for="radarr_profile_name">Optional profile filter name (blank = all profiles)</label>
+              <input id="radarr_profile_name" type="text" name="radarr_profile_name" value="{{ settings.radarr_profile_name }}" list="radarr-profile-options" />
+              <datalist id="radarr-profile-options">
+                {% for profile in radarr_profiles %}
+                <option value="{{ profile.name }}"></option>
+                {% endfor %}
+              </datalist>
+            </div>
+            <div class="actions">
+              <button type="submit">Save Radarr</button>
+              <button type="submit" formaction="/test/radarr" formmethod="post">Test Radarr</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tile">
+          <h2>
+            Sonarr
+            <span id="sonarr-badge" class="badge badge-unknown">Unknown</span>
+          </h2>
+          <form method="post" action="/settings/sonarr">
+            <div class="row">
+              <label for="sonarr_url">Sonarr URL</label>
+              <input id="sonarr_url" type="text" name="sonarr_url" value="{{ settings.sonarr_url }}" />
+            </div>
+            <div class="row">
+              <label for="sonarr_api_key">Sonarr API key</label>
+              <input id="sonarr_api_key" type="password" name="sonarr_api_key" value="{{ settings.sonarr_api_key }}" />
+            </div>
+            <div class="row">
+              <label for="sonarr_target_quality">Stop episode at quality text (example: Remux-2160p)</label>
+              <input id="sonarr_target_quality" type="text" name="sonarr_target_quality" value="{{ settings.sonarr_target_quality }}" />
+            </div>
+            <div class="row">
+              <label for="sonarr_profile_name">Optional profile filter name (blank = all profiles)</label>
+              <input id="sonarr_profile_name" type="text" name="sonarr_profile_name" value="{{ settings.sonarr_profile_name }}" list="sonarr-profile-options" />
+              <datalist id="sonarr-profile-options">
+                {% for profile in sonarr_profiles %}
+                <option value="{{ profile.name }}"></option>
+                {% endfor %}
+              </datalist>
+            </div>
+            <div class="actions">
+              <button type="submit">Save Sonarr</button>
+              <button type="submit" formaction="/test/sonarr" formmethod="post">Test Sonarr</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tile">
+          <h2>Worker</h2>
+          <form method="post" action="/settings">
+            <div class="row">
+              <label for="poll_interval_seconds">Poll interval (seconds)</label>
+              <input id="poll_interval_seconds" type="number" min="30" step="1" name="poll_interval_seconds" value="{{ settings.poll_interval_seconds }}" />
+            </div>
+            <div class="row">
+              <label>
+                <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} />
+                Polling enabled
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit">Save Worker</button>
+              <button type="submit" formaction="/run-now" formmethod="post">Run now</button>
+              <button type="submit" formaction="/clear-history" formmethod="post">Clear history</button>
+              <button type="submit" formaction="/clear-change-log" formmethod="post">Clear change log</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <h2>Recent runs</h2>
+      {% if recent_runs %}
+      <table>
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Duration (s)</th>
+            <th>Radarr</th>
+            <th>Sonarr</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in recent_runs %}
+          <tr>
+            <td>{{ run.started_at_display }}</td>
+            <td>{{ run.duration_seconds }}</td>
+            <td>{{ run.radarr_unmonitored }}</td>
+            <td>{{ run.sonarr_unmonitored }}</td>
+            <td>{% if run.error %}<span class="error">{{ run.error }}</span>{% else %}None{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p>No runs yet.</p>
+      {% endif %}
+
+      <h2>Change log</h2>
+      {% if recent_changes %}
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Service</th>
+            <th>Title</th>
+            <th>Profile</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for change in recent_changes %}
+          <tr>
+            <td>{{ change.timestamp_display }}</td>
+            <td>{{ change.service }}</td>
+            <td>{{ change.title }}</td>
+            <td>{{ change.profile_id }}</td>
+            <td>{{ change.action }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p>No item changes logged yet.</p>
+      {% endif %}
+    </div>
+
+    <script>
+      function applyBadge(elementId, state) {
+        const el = document.getElementById(elementId);
+        if (!el) {
+          return;
+        }
+        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
+        if (!state || state.ok === null || typeof state.ok === 'undefined') {
+          el.classList.add('badge-unknown');
+          el.textContent = 'Unknown';
+          return;
+        }
+        if (state.ok) {
+          el.classList.add('badge-ok');
+          el.textContent = 'Connected';
+          return;
+        }
+        el.classList.add('badge-bad');
+        el.textContent = 'Disconnected';
+      }
+
+      async function refreshBadges() {
+        try {
+          const response = await fetch('/status', { cache: 'no-store' });
+          if (!response.ok) {
+            return;
+          }
+          const data = await response.json();
+          const serviceStatus = data.service_status || {};
+          applyBadge('radarr-badge', serviceStatus.radarr);
+          applyBadge('sonarr-badge', serviceStatus.sonarr);
+        } catch (_err) {
+          applyBadge('radarr-badge', { ok: false });
+          applyBadge('sonarr-badge', { ok: false });
+        }
+      }
+
+      refreshBadges();
+      setInterval(refreshBadges, 10000);
+    </script>
+  </body>
+</html>

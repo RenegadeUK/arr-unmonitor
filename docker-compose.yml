@@ -1,0 +1,16 @@
+services:
+  arr-unmonitor:
+    build: .
+    container_name: arr-unmonitor
+    ports:
+      - "5200:5200"
+    environment:
+      RADARR_URL: "http://radarr:7878"
+      RADARR_API_KEY: ""
+      SONARR_URL: "http://sonarr:8989"
+      SONARR_API_KEY: ""
+      SETTINGS_PATH: "/config/settings.json"
+      PORT: "5200"
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
