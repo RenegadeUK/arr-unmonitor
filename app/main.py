@@ -274,6 +274,24 @@ def create_app() -> Flask:
     def status():
         settings = effective_settings(settings_store.load())
         payload = poller.status_payload()
+        now = datetime.now().timestamp()
+        next_run_at: float | None = None
+        seconds_until_next_run: int | None = None
+        if settings.enabled and poller.stats.last_run:
+            next_run_at = poller.stats.last_run + max(int(settings.poll_interval_seconds), 30)
+            seconds_until_next_run = max(int(next_run_at - now), 0)
+
+        health_state = "healthy"
+        if poller.stats.last_error:
+            health_state = "error"
+        elif poller.is_running():
+            health_state = "running"
+        elif not settings.enabled:
+            health_state = "paused"
+
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        unmonitored_today = change_log_store.count_since(today_start)
+
         payload["settings"] = {
             "radarr_url": settings.radarr_url,
             "sonarr_url": settings.sonarr_url,
@@ -287,6 +305,13 @@ def create_app() -> Flask:
             "sonarr_profile_id": settings.sonarr_profile_id,
             "poll_interval_seconds": settings.poll_interval_seconds,
             "enabled": settings.enabled,
+        }
+        payload["runtime"] = {
+            "is_running": poller.is_running(),
+            "next_run_at": next_run_at,
+            "seconds_until_next_run": seconds_until_next_run,
+            "health_state": health_state,
+            "unmonitored_today": unmonitored_today,
         }
         return jsonify(payload)
 

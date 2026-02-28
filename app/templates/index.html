@@ -21,6 +21,10 @@
       button { padding: 0.5rem 0.8rem; cursor: pointer; border: 1px solid #4b5563; border-radius: 6px; background: #374151; color: #e5e7eb; }
       button:hover { background: #4b5563; }
       .status { background: #262b33; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #3a404a; }
+      .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 0.8rem; }
+      .status-chip { background: #1f2329; border: 1px solid #3a404a; border-radius: 8px; padding: 0.6rem; }
+      .chip-label { color: #9ca3af; font-size: 0.82rem; margin-bottom: 0.2rem; }
+      .chip-value { font-weight: 700; }
       .error { color: #fca5a5; }
       .notice { color: #86efac; }
       .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: bold; }
@@ -38,6 +42,24 @@
       <h1>ARR Unmonitor</h1>
 
       <div class="status">
+        <div class="status-grid">
+          <div class="status-chip">
+            <div class="chip-label">Health</div>
+            <div class="chip-value"><span id="health-badge" class="badge badge-unknown">Unknown</span></div>
+          </div>
+          <div class="status-chip">
+            <div class="chip-label">Runner</div>
+            <div id="runner-state" class="chip-value">Idle</div>
+          </div>
+          <div class="status-chip">
+            <div class="chip-label">Next run in</div>
+            <div id="next-run-countdown" class="chip-value">--:--</div>
+          </div>
+          <div class="status-chip">
+            <div class="chip-label">Unmonitored today</div>
+            <div id="unmonitored-today" class="chip-value">0</div>
+          </div>
+        </div>
         <p><strong>Last poll:</strong> {{ last_run }}</p>
         <p><strong>Last unmonitored:</strong> Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</p>
         <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
@@ -225,6 +247,87 @@
         el.textContent = 'Disconnected';
       }
 
+      function pad2(value) {
+        return String(value).padStart(2, '0');
+      }
+
+      function formatCountdown(seconds) {
+        if (seconds === null || typeof seconds === 'undefined') {
+          return '--:--';
+        }
+        const safe = Math.max(0, Number(seconds) || 0);
+        const minutes = Math.floor(safe / 60);
+        const remSeconds = Math.floor(safe % 60);
+        return `${pad2(minutes)}:${pad2(remSeconds)}`;
+      }
+
+      function applyHealthBadge(state) {
+        const el = document.getElementById('health-badge');
+        if (!el) {
+          return;
+        }
+        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
+        if (state === 'healthy') {
+          el.classList.add('badge-ok');
+          el.textContent = 'Healthy';
+          return;
+        }
+        if (state === 'running') {
+          el.classList.add('badge-unknown');
+          el.textContent = 'Running';
+          return;
+        }
+        if (state === 'paused') {
+          el.classList.add('badge-unknown');
+          el.textContent = 'Paused';
+          return;
+        }
+        if (state === 'error') {
+          el.classList.add('badge-bad');
+          el.textContent = 'Error';
+          return;
+        }
+        el.classList.add('badge-unknown');
+        el.textContent = 'Unknown';
+      }
+
+      let runtimeState = {
+        seconds_until_next_run: null,
+      };
+
+      function renderRuntime(runtime) {
+        runtimeState.seconds_until_next_run = runtime && typeof runtime.seconds_until_next_run !== 'undefined'
+          ? runtime.seconds_until_next_run
+          : null;
+
+        const runner = document.getElementById('runner-state');
+        if (runner) {
+          runner.textContent = runtime && runtime.is_running ? 'Running now...' : 'Idle';
+        }
+
+        const today = document.getElementById('unmonitored-today');
+        if (today) {
+          today.textContent = String(runtime && typeof runtime.unmonitored_today !== 'undefined' ? runtime.unmonitored_today : 0);
+        }
+
+        applyHealthBadge(runtime ? runtime.health_state : undefined);
+        const countdown = document.getElementById('next-run-countdown');
+        if (countdown) {
+          countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
+        }
+      }
+
+      function tickCountdown() {
+        if (runtimeState.seconds_until_next_run === null || typeof runtimeState.seconds_until_next_run === 'undefined') {
+          return;
+        }
+        runtimeState.seconds_until_next_run = Math.max(0, runtimeState.seconds_until_next_run - 1);
+        const countdown = document.getElementById('next-run-countdown');
+        if (countdown) {
+          countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
+        }
+      }
+
       async function refreshBadges() {
         try {
           const response = await fetch('/status', { cache: 'no-store' });
@@ -235,14 +338,17 @@
           const serviceStatus = data.service_status || {};
           applyBadge('radarr-badge', serviceStatus.radarr);
           applyBadge('sonarr-badge', serviceStatus.sonarr);
+          renderRuntime(data.runtime || {});
         } catch (_err) {
           applyBadge('radarr-badge', { ok: false });
           applyBadge('sonarr-badge', { ok: false });
+          applyHealthBadge('error');
         }
       }
 
       refreshBadges();
-      setInterval(refreshBadges, 10000);
+      setInterval(refreshBadges, 5000);
+      setInterval(tickCountdown, 1000);
     </script>
   </body>
 </html>

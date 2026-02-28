@@ -44,3 +44,25 @@ class ChangeLogStore:
         with self._lock:
             with self.path.open("w", encoding="utf-8"):
                 pass
+
+    def count_since(self, since_timestamp: float) -> int:
+        if not self.path.exists():
+            return 0
+
+        count = 0
+        with self._lock:
+            with self.path.open("r", encoding="utf-8") as file:
+                for line in file:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    timestamp = payload.get("timestamp")
+                    if isinstance(timestamp, (int, float)) and float(timestamp) >= since_timestamp:
+                        count += 1
+        return count

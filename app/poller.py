@@ -137,6 +137,9 @@ class ArrPoller:
     def clear_history(self) -> None:
         self.stats.recent_runs.clear()
 
+    def is_running(self) -> bool:
+        return self._run_lock.locked()
+
     def update_service_status(self, service: str, ok: bool, message: str) -> None:
         self.stats.service_status[service] = {
             "ok": ok,
