@@ -60,8 +60,8 @@
             <div id="unmonitored-today" class="chip-value">0</div>
           </div>
         </div>
-        <p><strong>Last poll:</strong> {{ last_run }}</p>
-        <p><strong>Last unmonitored:</strong> Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</p>
+        <p><strong>Last poll:</strong> <span id="last-poll-value">{{ last_run }}</span></p>
+        <p><strong>Last unmonitored:</strong> <span id="last-unmonitored-value">Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</span></p>
         <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
         {% if stats.last_error %}
         <p class="error"><strong>Last error:</strong> {{ stats.last_error }}</p>
@@ -261,6 +261,23 @@
         return `${pad2(minutes)}:${pad2(remSeconds)}`;
       }
 
+      function formatTimestamp(value) {
+        if (value === null || typeof value === 'undefined') {
+          return 'Never';
+        }
+        const date = new Date(Number(value) * 1000);
+        if (Number.isNaN(date.getTime())) {
+          return 'Never';
+        }
+        const year = date.getFullYear();
+        const month = pad2(date.getMonth() + 1);
+        const day = pad2(date.getDate());
+        const hours = pad2(date.getHours());
+        const minutes = pad2(date.getMinutes());
+        const seconds = pad2(date.getSeconds());
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      }
+
       function applyHealthBadge(state) {
         const el = document.getElementById('health-badge');
         if (!el) {
@@ -317,6 +334,21 @@
         }
       }
 
+      function renderLastRunInfo(data) {
+        const lastPoll = document.getElementById('last-poll-value');
+        if (lastPoll) {
+          lastPoll.textContent = formatTimestamp(data.last_run);
+        }
+
+        const lastUnmonitored = document.getElementById('last-unmonitored-value');
+        if (lastUnmonitored) {
+          const counts = data.last_unmonitored || {};
+          const radarr = typeof counts.radarr === 'number' ? counts.radarr : 0;
+          const sonarr = typeof counts.sonarr === 'number' ? counts.sonarr : 0;
+          lastUnmonitored.textContent = `Radarr ${radarr}, Sonarr ${sonarr}`;
+        }
+      }
+
       function tickCountdown() {
         if (runtimeState.seconds_until_next_run === null || typeof runtimeState.seconds_until_next_run === 'undefined') {
           return;
@@ -339,6 +371,7 @@
           applyBadge('radarr-badge', serviceStatus.radarr);
           applyBadge('sonarr-badge', serviceStatus.sonarr);
           renderRuntime(data.runtime || {});
+          renderLastRunInfo(data);
         } catch (_err) {
           applyBadge('radarr-badge', { ok: false });
           applyBadge('sonarr-badge', { ok: false });
