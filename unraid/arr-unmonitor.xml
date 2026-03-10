@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>arr-unmonitor</Name>
+  <Repository>ghcr.io/renegadeuk/arr-unmonitor:development</Repository>
+  <Registry>https://github.com/RenegadeUK/arr-unmonitor/pkgs/container/arr-unmonitor</Registry>
+  <Branch>
+    <Tag>development</Tag>
+    <TagDescription>Development branch (latest features)</TagDescription>
+  </Branch>
+  <Branch>
+    <Tag>main</Tag>
+    <TagDescription>Stable release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/RenegadeUK/arr-unmonitor/issues</Support>
+  <Project>https://github.com/RenegadeUK/arr-unmonitor</Project>
+  <Overview>
+    Automatically unmonitors completed media in Radarr and Sonarr once they reach a target quality.
+
+    Supports multiple server instances (e.g. Radarr-4K, Radarr-1080p, Sonarr-Anime).
+    Web UI with Dashboard, Settings, and Logs tabs.
+
+    IMPORTANT: The Radarr/Sonarr URL and API Key variables below only seed servers on FIRST LAUNCH with empty settings.
+    After that, manage all servers via the Settings tab in the Web UI.
+  </Overview>
+  <Category>MediaApp:Other Tools:</Category>
+  <WebUI>http://[IP]:[PORT:5200]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/RenegadeUK/arr-unmonitor/main/unraid/arr-unmonitor.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/RenegadeUK/arr-unmonitor/main/app/static/favicon.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config
+    Name="Web UI Port"
+    Target="5200"
+    Default="5200"
+    Mode="tcp"
+    Description="Port for the web interface."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">5200</Config>
+  <Config
+    Name="Config Path"
+    Target="/config"
+    Default="/mnt/user/appdata/arr-unmonitor"
+    Mode="rw"
+    Description="Persistent storage for settings, change log, and app log."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/arr-unmonitor</Config>
+  <Config
+    Name="Radarr URL"
+    Target="RADARR_URL"
+    Default=""
+    Mode=""
+    Description="Radarr base URL (e.g. http://radarr:7878). Only used to seed on first launch."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"/>
+  <Config
+    Name="Radarr API Key"
+    Target="RADARR_API_KEY"
+    Default=""
+    Mode=""
+    Description="Radarr API key. Only used to seed on first launch."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"/>
+  <Config
+    Name="Sonarr URL"
+    Target="SONARR_URL"
+    Default=""
+    Mode=""
+    Description="Sonarr base URL (e.g. http://sonarr:8989). Only used to seed on first launch."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"/>
+  <Config
+    Name="Sonarr API Key"
+    Target="SONARR_API_KEY"
+    Default=""
+    Mode=""
+    Description="Sonarr API key. Only used to seed on first launch."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"/>
+</Container>

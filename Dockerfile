@@ -17,4 +17,7 @@ COPY app ./app
 EXPOSE 5200
 VOLUME ["/config"]
 
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5200/health')" || exit 1
+
 CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5200", "app.main:app"]

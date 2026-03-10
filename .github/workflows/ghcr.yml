@@ -40,6 +40,9 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha
+          labels: |
+            net.unraid.docker.webui=http://[IP]:[PORT:5200]/
+            net.unraid.docker.icon=https://raw.githubusercontent.com/RenegadeUK/arr-unmonitor/main/app/static/favicon.svg
 
       - name: Build and push
         uses: docker/build-push-action@v6
