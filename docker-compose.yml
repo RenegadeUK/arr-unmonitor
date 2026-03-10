@@ -5,11 +5,14 @@ services:
     ports:
       - "5200:5200"
     environment:
+      # These env vars seed servers on FIRST RUN only (empty settings).
+      # After that, manage servers via the Settings tab in the UI.
       RADARR_URL: "http://radarr:7878"
       RADARR_API_KEY: ""
       SONARR_URL: "http://sonarr:8989"
       SONARR_API_KEY: ""
       SETTINGS_PATH: "/config/settings.json"
+      CHANGE_LOG_PATH: "/config/change-log.jsonl"
       LOG_PATH: "/config/app-log.jsonl"
       PORT: "5200"
     volumes:

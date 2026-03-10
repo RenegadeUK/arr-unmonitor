@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5200
 ENV SETTINGS_PATH=/config/settings.json
+ENV CHANGE_LOG_PATH=/config/change-log.jsonl
+ENV LOG_PATH=/config/app-log.jsonl
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

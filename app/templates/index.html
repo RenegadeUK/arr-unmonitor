@@ -22,18 +22,24 @@
       .tab-panel { display: none; }
       .tab-panel.active { display: block; }
 
-      /* ── Existing styles ── */
+      /* ── Common styles ── */
       .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
       .tile { background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; padding: 1rem; }
       .tile h2 { margin: 0 0 1rem 0; font-size: 1.1rem; }
       .row { margin-bottom: 0.85rem; }
       label { display: block; margin-bottom: 0.35rem; font-weight: bold; color: #d1d5db; }
       select, input[type='number'], input[type='text'], input[type='password'] {
-        width: 100%; padding: 0.5rem; background: #1f2329; color: #e5e7eb; border: 1px solid #4b5563; border-radius: 6px;
+        width: 100%; padding: 0.5rem; background: #1f2329; color: #e5e7eb; border: 1px solid #4b5563; border-radius: 6px; box-sizing: border-box;
       }
       .actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
       button { padding: 0.5rem 0.8rem; cursor: pointer; border: 1px solid #4b5563; border-radius: 6px; background: #374151; color: #e5e7eb; }
       button:hover { background: #4b5563; }
+      button.btn-primary { background: #1e3a5f; border-color: #2563eb; }
+      button.btn-primary:hover { background: #1e40af; }
+      button.btn-danger { background: #7f1d1d; border-color: #dc2626; }
+      button.btn-danger:hover { background: #991b1b; }
+      button.btn-success { background: #14532d; border-color: #16a34a; }
+      button.btn-success:hover { background: #166534; }
       .status { background: #262b33; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #3a404a; }
       .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 0.8rem; }
       .status-chip { background: #1f2329; border: 1px solid #3a404a; border-radius: 8px; padding: 0.6rem; }
@@ -45,10 +51,16 @@
       .badge-ok { background: #14532d; color: #bbf7d0; }
       .badge-bad { background: #7f1d1d; color: #fecaca; }
       .badge-unknown { background: #3f3f46; color: #d4d4d8; }
+      .badge-disabled { background: #374151; color: #6b7280; }
       table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
       th, td { border: 1px solid #3a404a; padding: 0.45rem; text-align: left; }
       th { background: #262b33; }
       a { color: #93c5fd; }
+
+      /* ── Type badges ── */
+      .type-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.78rem; font-weight: 600; text-transform: capitalize; }
+      .type-radarr { background: #1e3a5f; color: #93c5fd; }
+      .type-sonarr { background: #14532d; color: #bbf7d0; }
 
       /* ── Log level badges ── */
       .log-level { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.78rem; font-weight: bold; font-family: monospace; min-width: 58px; text-align: center; }
@@ -79,6 +91,32 @@
       .src-App      { background: #713f12; color: #fde68a; }
       .src-Config   { background: #4a1d6e; color: #d8b4fe; }
       .src-default  { background: #3f3f46; color: #d4d4d8; }
+
+      /* ── Settings tab ── */
+      .settings-section { background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; padding: 1.2rem; margin-bottom: 1.2rem; }
+      .settings-section h2 { margin: 0 0 1rem 0; font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem; }
+      .server-card { background: #262b33; border: 1px solid #3a404a; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+      .server-card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+      .server-card-header h3 { margin: 0; font-size: 1rem; }
+      .server-card-details { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.2rem; font-size: 0.9rem; }
+      .server-card-details .detail-label { color: #9ca3af; font-size: 0.82rem; }
+      .server-card-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+      .form-grid .full-width { grid-column: 1 / -1; }
+
+      /* ── Toast ── */
+      .toast { position: fixed; top: 1rem; right: 1rem; padding: 0.75rem 1.2rem; border-radius: 8px; font-weight: 600; z-index: 999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+      .toast.show { opacity: 1; pointer-events: auto; }
+      .toast-ok { background: #14532d; color: #bbf7d0; border: 1px solid #16a34a; }
+      .toast-err { background: #7f1d1d; color: #fecaca; border: 1px solid #dc2626; }
+
+      /* ── Dashboard server cards ── */
+      .dash-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.2rem; }
+      .dash-card { background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; padding: 1rem; }
+      .dash-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+      .dash-card-header h3 { margin: 0; font-size: 1rem; }
+      .dash-card-stat { display: flex; justify-content: space-between; padding: 0.25rem 0; font-size: 0.9rem; color: #d1d5db; }
+      .dash-card-stat .stat-value { font-weight: 700; }
     </style>
   </head>
   <body>
@@ -88,8 +126,12 @@
       <!-- ═══ Tab navigation ═══ -->
       <nav class="tab-nav">
         <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
         <button class="tab-btn" data-tab="logs">Logs</button>
       </nav>
+
+      <!-- Toast notification -->
+      <div id="toast" class="toast"></div>
 
       <!-- ═══════════════════════════════════════════ -->
       <!-- ═══ Dashboard tab ═══ -->
@@ -116,13 +158,10 @@
             </div>
           </div>
           <p><strong>Last poll:</strong> <span id="last-poll-value">{{ last_run }}</span></p>
-          <p><strong>Last unmonitored:</strong> <span id="last-unmonitored-value">Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</span></p>
+          <p><strong>Last unmonitored:</strong> <span id="last-unmonitored-value">--</span></p>
           <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
           {% if stats.last_error %}
           <p class="error"><strong>Last error:</strong> {{ stats.last_error }}</p>
-          {% endif %}
-          {% if profile_error %}
-          <p class="error"><strong>Profile load error:</strong> {{ profile_error }}</p>
           {% endif %}
           {% if notice %}
           <p class="notice"><strong>Notice:</strong> {{ notice }}</p>
@@ -132,95 +171,18 @@
           {% endif %}
         </div>
 
-        <div class="tiles">
-          <div class="tile">
-            <h2>
-              Radarr
-              <span id="radarr-badge" class="badge badge-unknown">Unknown</span>
-            </h2>
-            <form method="post" action="/settings/radarr">
-              <div class="row">
-                <label for="radarr_url">Radarr URL</label>
-                <input id="radarr_url" type="text" name="radarr_url" value="{{ settings.radarr_url }}" />
-              </div>
-              <div class="row">
-                <label for="radarr_api_key">Radarr API key</label>
-                <input id="radarr_api_key" type="password" name="radarr_api_key" value="{{ settings.radarr_api_key }}" />
-              </div>
-              <div class="row">
-                <label for="radarr_target_quality">Stop at quality text (example: Remux-2160p)</label>
-                <input id="radarr_target_quality" type="text" name="radarr_target_quality" value="{{ settings.radarr_target_quality }}" />
-              </div>
-              <div class="row">
-                <label for="radarr_profile_name">Optional profile filter name (blank = all profiles)</label>
-                <input id="radarr_profile_name" type="text" name="radarr_profile_name" value="{{ settings.radarr_profile_name }}" list="radarr-profile-options" />
-                <datalist id="radarr-profile-options">
-                  {% for profile in radarr_profiles %}
-                  <option value="{{ profile.name }}"></option>
-                  {% endfor %}
-                </datalist>
-              </div>
-              <div class="actions">
-                <button type="submit">Save Radarr</button>
-                <button type="submit" formaction="/test/radarr" formmethod="post">Test Radarr</button>
-              </div>
-            </form>
-          </div>
+        <!-- Dynamic server summary cards -->
+        <div id="dash-server-cards" class="dash-cards">
+          <p style="color:#9ca3af;">Loading servers&hellip;</p>
+        </div>
 
-          <div class="tile">
-            <h2>
-              Sonarr
-              <span id="sonarr-badge" class="badge badge-unknown">Unknown</span>
-            </h2>
-            <form method="post" action="/settings/sonarr">
-              <div class="row">
-                <label for="sonarr_url">Sonarr URL</label>
-                <input id="sonarr_url" type="text" name="sonarr_url" value="{{ settings.sonarr_url }}" />
-              </div>
-              <div class="row">
-                <label for="sonarr_api_key">Sonarr API key</label>
-                <input id="sonarr_api_key" type="password" name="sonarr_api_key" value="{{ settings.sonarr_api_key }}" />
-              </div>
-              <div class="row">
-                <label for="sonarr_target_quality">Stop episode at quality text (example: Remux-2160p)</label>
-                <input id="sonarr_target_quality" type="text" name="sonarr_target_quality" value="{{ settings.sonarr_target_quality }}" />
-              </div>
-              <div class="row">
-                <label for="sonarr_profile_name">Optional profile filter name (blank = all profiles)</label>
-                <input id="sonarr_profile_name" type="text" name="sonarr_profile_name" value="{{ settings.sonarr_profile_name }}" list="sonarr-profile-options" />
-                <datalist id="sonarr-profile-options">
-                  {% for profile in sonarr_profiles %}
-                  <option value="{{ profile.name }}"></option>
-                  {% endfor %}
-                </datalist>
-              </div>
-              <div class="actions">
-                <button type="submit">Save Sonarr</button>
-                <button type="submit" formaction="/test/sonarr" formmethod="post">Test Sonarr</button>
-              </div>
-            </form>
-          </div>
-
-          <div class="tile">
-            <h2>Worker</h2>
-            <form method="post" action="/settings">
-              <div class="row">
-                <label for="poll_interval_seconds">Poll interval (seconds)</label>
-                <input id="poll_interval_seconds" type="number" min="30" step="1" name="poll_interval_seconds" value="{{ settings.poll_interval_seconds }}" />
-              </div>
-              <div class="row">
-                <label>
-                  <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} />
-                  Polling enabled
-                </label>
-              </div>
-              <div class="actions">
-                <button type="submit">Save Worker</button>
-                <button type="submit" formaction="/run-now" formmethod="post">Run now</button>
-                <button type="submit" formaction="/clear-history" formmethod="post">Clear history</button>
-                <button type="submit" formaction="/clear-change-log" formmethod="post">Clear change log</button>
-              </div>
-            </form>
+        <!-- Worker controls -->
+        <div class="tile" style="margin-bottom:1.2rem;">
+          <h2>Worker</h2>
+          <div class="actions">
+            <form method="post" action="/run-now" style="margin:0;"><button type="submit">Run now</button></form>
+            <form method="post" action="/clear-history" style="margin:0;"><button type="submit">Clear history</button></form>
+            <form method="post" action="/clear-change-log" style="margin:0;"><button type="submit">Clear change log</button></form>
           </div>
         </div>
 
@@ -231,8 +193,7 @@
             <tr>
               <th>Started</th>
               <th>Duration (s)</th>
-              <th>Radarr</th>
-              <th>Sonarr</th>
+              <th>Unmonitored</th>
               <th>Error</th>
             </tr>
           </thead>
@@ -241,8 +202,7 @@
             <tr>
               <td>{{ run.started_at_display }}</td>
               <td>{{ run.duration_seconds }}</td>
-              <td>{{ run.radarr_unmonitored }}</td>
-              <td>{{ run.sonarr_unmonitored }}</td>
+              <td>{{ run.total_unmonitored | default(0) }}</td>
               <td>{% if run.error %}<span class="error">{{ run.error }}</span>{% else %}None{% endif %}</td>
             </tr>
             {% endfor %}
@@ -271,6 +231,94 @@
       </div><!-- /tab-dashboard -->
 
       <!-- ═══════════════════════════════════════════ -->
+      <!-- ═══ Settings tab ═══ -->
+      <!-- ═══════════════════════════════════════════ -->
+      <div id="tab-settings" class="tab-panel">
+
+        <!-- Server list -->
+        <div class="settings-section">
+          <h2>Servers <button class="btn-primary" onclick="showAddServerForm()" style="font-size:0.85rem; padding:0.3rem 0.7rem;">+ Add Server</button></h2>
+          <div id="server-list">
+            <p style="color:#9ca3af;">Loading servers&hellip;</p>
+          </div>
+        </div>
+
+        <!-- Add / Edit server form (hidden by default) -->
+        <div id="server-form-section" class="settings-section" style="display:none;">
+          <h2 id="server-form-title">Add Server</h2>
+          <input type="hidden" id="sf-original-name" value="" />
+          <div class="form-grid">
+            <div>
+              <label for="sf-name">Server Name</label>
+              <input id="sf-name" type="text" placeholder="e.g. Radarr-4K" />
+            </div>
+            <div>
+              <label for="sf-type">Type</label>
+              <select id="sf-type">
+                <option value="radarr">Radarr</option>
+                <option value="sonarr">Sonarr</option>
+              </select>
+            </div>
+            <div>
+              <label for="sf-url">URL</label>
+              <input id="sf-url" type="text" placeholder="https://radarr.example.com" />
+            </div>
+            <div>
+              <label for="sf-api-key">API Key</label>
+              <input id="sf-api-key" type="password" />
+            </div>
+            <div>
+              <label for="sf-target-quality">Target Quality</label>
+              <input id="sf-target-quality" type="text" placeholder="e.g. Remux-2160p" />
+            </div>
+            <div>
+              <label for="sf-profile-name">Profile Filter (blank = all)</label>
+              <input id="sf-profile-name" type="text" />
+            </div>
+            <div>
+              <label for="sf-stop-mode">Stop Mode</label>
+              <select id="sf-stop-mode">
+                <option value="cutoff">Cutoff</option>
+              </select>
+            </div>
+            <div>
+              <label for="sf-enabled">Enabled</label>
+              <select id="sf-enabled">
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions" style="margin-top:1rem;">
+            <button class="btn-primary" onclick="submitServerForm()">Save</button>
+            <button onclick="hideServerForm()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Global settings -->
+        <div class="settings-section">
+          <h2>Global Settings</h2>
+          <div class="form-grid">
+            <div>
+              <label for="gs-poll-interval">Poll Interval (seconds)</label>
+              <input id="gs-poll-interval" type="number" min="30" step="1" value="{{ settings.poll_interval_seconds }}" />
+            </div>
+            <div>
+              <label for="gs-enabled">Polling Enabled</label>
+              <select id="gs-enabled">
+                <option value="true" {% if settings.enabled %}selected{% endif %}>Yes</option>
+                <option value="false" {% if not settings.enabled %}selected{% endif %}>No</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions" style="margin-top:1rem;">
+            <button class="btn-primary" onclick="saveGlobalSettings()">Save Global Settings</button>
+          </div>
+        </div>
+
+      </div><!-- /tab-settings -->
+
+      <!-- ═══════════════════════════════════════════ -->
       <!-- ═══ Logs tab ═══ -->
       <!-- ═══════════════════════════════════════════ -->
       <div id="tab-logs" class="tab-panel">
@@ -287,11 +335,10 @@
           <label for="log-source-filter">Source:</label>
           <select id="log-source-filter">
             <option value="" selected>All</option>
-            <option value="Radarr">Radarr</option>
-            <option value="Sonarr">Sonarr</option>
             <option value="Poller">Poller</option>
             <option value="App">App</option>
             <option value="Config">Config</option>
+            <!-- Server names populated dynamically -->
           </select>
 
           <label for="log-limit">Show:</label>
@@ -338,131 +385,354 @@
         tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
         tabPanels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabId));
         window.location.hash = tabId;
-        if (tabId === 'logs') { refreshLogs(); }
+        if (tabId === 'logs') refreshLogs();
+        if (tabId === 'settings') refreshServerList();
       }
 
       tabBtns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
-      // Restore tab from URL hash
       const initHash = window.location.hash.replace('#', '');
       if (initHash && document.getElementById('tab-' + initHash)) {
         switchTab(initHash);
       }
 
-      /* ═══ Shared helpers ═══ */
-      function pad2(value) {
-        return String(value).padStart(2, '0');
+      /* ═══ Toast ═══ */
+      let toastTimer = null;
+      function showToast(message, ok) {
+        const el = document.getElementById('toast');
+        el.textContent = message;
+        el.className = 'toast show ' + (ok ? 'toast-ok' : 'toast-err');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
       }
 
+      /* ═══ Shared helpers ═══ */
+      function pad2(v) { return String(v).padStart(2, '0'); }
+
       function formatCountdown(seconds) {
-        if (seconds === null || typeof seconds === 'undefined') { return '--:--'; }
-        const safe = Math.max(0, Number(seconds) || 0);
-        const minutes = Math.floor(safe / 60);
-        const remSeconds = Math.floor(safe % 60);
-        return `${pad2(minutes)}:${pad2(remSeconds)}`;
+        if (seconds == null) return '--:--';
+        const s = Math.max(0, Number(seconds) || 0);
+        return `${pad2(Math.floor(s / 60))}:${pad2(Math.floor(s % 60))}`;
       }
 
       function formatTimestamp(value) {
-        if (value === null || typeof value === 'undefined') { return 'Never'; }
-        const date = new Date(Number(value) * 1000);
-        if (Number.isNaN(date.getTime())) { return 'Never'; }
-        return `${date.getFullYear()}-${pad2(date.getMonth()+1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+        if (value == null) return 'Never';
+        const d = new Date(Number(value) * 1000);
+        if (Number.isNaN(d.getTime())) return 'Never';
+        return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
       }
 
-      /* ═══ Dashboard: badges & status ═══ */
-      function applyBadge(elementId, state) {
-        const el = document.getElementById(elementId);
-        if (!el) { return; }
-        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        if (!state || state.ok === null || typeof state.ok === 'undefined') {
-          el.classList.add('badge-unknown'); el.textContent = 'Unknown'; return;
-        }
-        if (state.ok) { el.classList.add('badge-ok'); el.textContent = 'Connected'; return; }
-        el.classList.add('badge-bad'); el.textContent = 'Disconnected';
-      }
-
-      function applyHealthBadge(state) {
-        const el = document.getElementById('health-badge');
-        if (!el) { return; }
-        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], error: ['badge-bad','Error'] };
-        const entry = map[state] || ['badge-unknown', 'Unknown'];
-        el.classList.add(entry[0]); el.textContent = entry[1];
-      }
-
-      let runtimeState = { seconds_until_next_run: null };
-
-      function renderRuntime(runtime) {
-        runtimeState.seconds_until_next_run = runtime && typeof runtime.seconds_until_next_run !== 'undefined' ? runtime.seconds_until_next_run : null;
-        const runner = document.getElementById('runner-state');
-        if (runner) { runner.textContent = runtime && runtime.is_running ? 'Running now...' : 'Idle'; }
-        const today = document.getElementById('unmonitored-today');
-        if (today) { today.textContent = String(runtime && typeof runtime.unmonitored_today !== 'undefined' ? runtime.unmonitored_today : 0); }
-        applyHealthBadge(runtime ? runtime.health_state : undefined);
-        const countdown = document.getElementById('next-run-countdown');
-        if (countdown) { countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run); }
-      }
-
-      function renderLastRunInfo(data) {
-        const lastPoll = document.getElementById('last-poll-value');
-        if (lastPoll) { lastPoll.textContent = formatTimestamp(data.last_run); }
-        const lastUnmonitored = document.getElementById('last-unmonitored-value');
-        if (lastUnmonitored) {
-          const counts = data.last_unmonitored || {};
-          lastUnmonitored.textContent = `Radarr ${typeof counts.radarr === 'number' ? counts.radarr : 0}, Sonarr ${typeof counts.sonarr === 'number' ? counts.sonarr : 0}`;
-        }
-      }
-
-      function tickCountdown() {
-        if (runtimeState.seconds_until_next_run === null || typeof runtimeState.seconds_until_next_run === 'undefined') { return; }
-        runtimeState.seconds_until_next_run = Math.max(0, runtimeState.seconds_until_next_run - 1);
-        const countdown = document.getElementById('next-run-countdown');
-        if (countdown) { countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run); }
-      }
-
-      async function refreshBadges() {
-        try {
-          const response = await fetch('/status', { cache: 'no-store' });
-          if (!response.ok) { return; }
-          const data = await response.json();
-          const serviceStatus = data.service_status || {};
-          applyBadge('radarr-badge', serviceStatus.radarr);
-          applyBadge('sonarr-badge', serviceStatus.sonarr);
-          renderRuntime(data.runtime || {});
-          renderLastRunInfo(data);
-        } catch (_err) {
-          applyBadge('radarr-badge', { ok: false });
-          applyBadge('sonarr-badge', { ok: false });
-          applyHealthBadge('error');
-        }
-      }
-
-      /* ═══ Logs tab: auto-refresh ═══ */
       function escapeHtml(str) {
         const div = document.createElement('div');
-        div.appendChild(document.createTextNode(str));
+        div.appendChild(document.createTextNode(String(str)));
         return div.innerHTML;
       }
 
       function sourceBadgeClass(src) {
         const known = ['Radarr','Sonarr','Poller','App','Config'];
-        return known.includes(src) ? `src-${src}` : 'src-default';
+        if (known.includes(src)) return `src-${src}`;
+        const lower = (src || '').toLowerCase();
+        if (lower.includes('radarr')) return 'src-Radarr';
+        if (lower.includes('sonarr')) return 'src-Sonarr';
+        return 'src-default';
       }
 
-      /* ═══ Change log: auto-refresh ═══ */
+      /* ═══ API helper ═══ */
+      async function apiFetch(url, options) {
+        const resp = await fetch(url, { cache: 'no-store', ...options });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        return data;
+      }
+
+      /* ═══ Cached server list ═══ */
+      let cachedServers = [];
+      async function loadServers() {
+        try { cachedServers = await apiFetch('/api/servers'); } catch (_) { cachedServers = []; }
+        return cachedServers;
+      }
+
+      /* ═══ Dashboard: health & status ═══ */
+      function applyHealthBadge(state) {
+        const el = document.getElementById('health-badge');
+        if (!el) return;
+        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
+        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], error: ['badge-bad','Error'] };
+        const e = map[state] || ['badge-unknown', 'Unknown'];
+        el.classList.add(e[0]); el.textContent = e[1];
+      }
+
+      let runtimeState = { seconds_until_next_run: null };
+
+      function renderRuntime(runtime) {
+        runtimeState.seconds_until_next_run = runtime?.seconds_until_next_run ?? null;
+        const runner = document.getElementById('runner-state');
+        if (runner) runner.textContent = runtime?.is_running ? 'Running now...' : 'Idle';
+        const today = document.getElementById('unmonitored-today');
+        if (today) today.textContent = String(runtime?.unmonitored_today ?? 0);
+        applyHealthBadge(runtime?.health_state);
+        const countdown = document.getElementById('next-run-countdown');
+        if (countdown) countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
+      }
+
+      function renderLastRunInfo(data) {
+        const lastPoll = document.getElementById('last-poll-value');
+        if (lastPoll) lastPoll.textContent = formatTimestamp(data.last_run);
+        const lastEl = document.getElementById('last-unmonitored-value');
+        if (lastEl) {
+          const counts = data.last_unmonitored || {};
+          const parts = Object.entries(counts).map(([k, v]) => `${k} ${v}`);
+          lastEl.textContent = parts.length ? parts.join(', ') : 'None';
+        }
+      }
+
+      function tickCountdown() {
+        if (runtimeState.seconds_until_next_run == null) return;
+        runtimeState.seconds_until_next_run = Math.max(0, runtimeState.seconds_until_next_run - 1);
+        const el = document.getElementById('next-run-countdown');
+        if (el) el.textContent = formatCountdown(runtimeState.seconds_until_next_run);
+      }
+
+      /* ═══ Dashboard: server cards ═══ */
+      function renderDashServerCards(servers) {
+        const ct = document.getElementById('dash-server-cards');
+        if (!ct) return;
+        if (!servers?.length) {
+          ct.innerHTML = '<p style="color:#9ca3af;">No servers configured. <a href="#settings" onclick="switchTab(\'settings\')">Add one in Settings</a>.</p>';
+          return;
+        }
+        let html = '';
+        for (const s of servers) {
+          const status = s.status || {};
+          let bc = 'badge-unknown', bt = 'Unknown';
+          if (!s.enabled) { bc = 'badge-disabled'; bt = 'Disabled'; }
+          else if (status.ok === true) { bc = 'badge-ok'; bt = 'Connected'; }
+          else if (status.ok === false) { bc = 'badge-bad'; bt = 'Disconnected'; }
+
+          html += `<div class="dash-card">
+            <div class="dash-card-header">
+              <span class="type-badge type-${escapeHtml(s.type)}">${escapeHtml(s.type)}</span>
+              <h3>${escapeHtml(s.name)}</h3>
+              <span class="badge ${bc}">${bt}</span>
+            </div>
+            <div class="dash-card-stat"><span>URL</span><span class="stat-value" style="font-size:0.85rem;color:#9ca3af;">${escapeHtml(s.url || 'Not set')}</span></div>
+            <div class="dash-card-stat"><span>Target Quality</span><span class="stat-value">${escapeHtml(s.target_quality || 'Not set')}</span></div>
+            <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">--</span></div>
+            <div style="margin-top:0.5rem;"><a href="#settings" onclick="switchTab('settings');" style="font-size:0.85rem;">Edit in Settings</a></div>
+          </div>`;
+        }
+        ct.innerHTML = html;
+      }
+
+      async function refreshStatus() {
+        try {
+          const resp = await fetch('/status', { cache: 'no-store' });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          renderRuntime(data.runtime || {});
+          renderLastRunInfo(data);
+
+          // Merge status data into cached server info for dash cards
+          const statusServers = data.servers || [];
+          const merged = statusServers.map(ss => {
+            const cached = cachedServers.find(c => c.name === ss.name) || {};
+            return { ...cached, ...ss };
+          });
+          if (merged.length > 0) renderDashServerCards(merged);
+
+          // Update per-server unmonitored count
+          const unmon = data.last_unmonitored || {};
+          for (const [name, count] of Object.entries(unmon)) {
+            const el = document.getElementById('dash-unmon-' + name);
+            if (el) el.textContent = String(count);
+          }
+        } catch (_) {
+          applyHealthBadge('error');
+        }
+      }
+
+      /* ═══ Settings: server list ═══ */
+      async function refreshServerList() {
+        const servers = await loadServers();
+        const ct = document.getElementById('server-list');
+        if (!ct) return;
+
+        if (!servers.length) {
+          ct.innerHTML = '<p style="color:#9ca3af;">No servers configured yet. Click "+ Add Server" to get started.</p>';
+          updateLogSourceFilter(servers);
+          return;
+        }
+
+        let html = '';
+        for (const s of servers) {
+          const status = s.status || {};
+          let bc = 'badge-unknown', bt = 'Unknown';
+          if (!s.enabled) { bc = 'badge-disabled'; bt = 'Disabled'; }
+          else if (status.ok === true) { bc = 'badge-ok'; bt = 'Connected'; }
+          else if (status.ok === false) { bc = 'badge-bad'; bt = 'Disconnected'; }
+
+          html += `<div class="server-card">
+            <div class="server-card-header">
+              <span class="type-badge type-${escapeHtml(s.type)}">${escapeHtml(s.type)}</span>
+              <h3>${escapeHtml(s.name)}</h3>
+              <span class="badge ${bc}">${bt}</span>
+              ${!s.enabled ? '<span style="color:#6b7280;font-size:0.85rem;">(disabled)</span>' : ''}
+            </div>
+            <div class="server-card-details">
+              <div><div class="detail-label">URL</div><div>${escapeHtml(s.url || 'Not set')}</div></div>
+              <div><div class="detail-label">API Key</div><div>${escapeHtml(s.api_key || '***')}</div></div>
+              <div><div class="detail-label">Target Quality</div><div>${escapeHtml(s.target_quality || 'Not set')}</div></div>
+              <div><div class="detail-label">Profile Filter</div><div>${escapeHtml(s.profile_name || 'All profiles')}</div></div>
+              <div><div class="detail-label">Stop Mode</div><div>${escapeHtml(s.stop_mode || 'cutoff')}</div></div>
+              <div><div class="detail-label">Status</div><div>${escapeHtml(status.message || 'Not checked yet')}</div></div>
+            </div>
+            <div class="server-card-actions">
+              <button onclick="editServer('${escapeHtml(s.name)}')">Edit</button>
+              <button class="btn-success" onclick="testServer('${escapeHtml(s.name)}')">Test</button>
+              <button class="btn-danger" onclick="deleteServer('${escapeHtml(s.name)}')">Delete</button>
+            </div>
+          </div>`;
+        }
+        ct.innerHTML = html;
+        updateLogSourceFilter(servers);
+      }
+
+      /* ═══ Settings: add / edit form ═══ */
+      let editMode = false;
+
+      function showAddServerForm() {
+        editMode = false;
+        document.getElementById('server-form-title').textContent = 'Add Server';
+        document.getElementById('sf-original-name').value = '';
+        document.getElementById('sf-name').value = '';
+        document.getElementById('sf-type').value = 'radarr';
+        document.getElementById('sf-url').value = '';
+        document.getElementById('sf-api-key').value = '';
+        document.getElementById('sf-target-quality').value = '';
+        document.getElementById('sf-profile-name').value = '';
+        document.getElementById('sf-stop-mode').value = 'cutoff';
+        document.getElementById('sf-enabled').value = 'true';
+        document.getElementById('server-form-section').style.display = '';
+        document.getElementById('sf-name').focus();
+      }
+
+      function editServer(name) {
+        const s = cachedServers.find(srv => srv.name === name);
+        if (!s) return;
+        editMode = true;
+        document.getElementById('server-form-title').textContent = `Edit Server: ${s.name}`;
+        document.getElementById('sf-original-name').value = s.name;
+        document.getElementById('sf-name').value = s.name;
+        document.getElementById('sf-type').value = s.type;
+        document.getElementById('sf-url').value = s.url || '';
+        document.getElementById('sf-api-key').value = s.api_key_full || '';
+        document.getElementById('sf-target-quality').value = s.target_quality || '';
+        document.getElementById('sf-profile-name').value = s.profile_name || '';
+        document.getElementById('sf-stop-mode').value = s.stop_mode || 'cutoff';
+        document.getElementById('sf-enabled').value = s.enabled ? 'true' : 'false';
+        document.getElementById('server-form-section').style.display = '';
+        document.getElementById('sf-name').focus();
+      }
+
+      function hideServerForm() {
+        document.getElementById('server-form-section').style.display = 'none';
+      }
+
+      async function submitServerForm() {
+        const payload = {
+          name: document.getElementById('sf-name').value.trim(),
+          type: document.getElementById('sf-type').value,
+          url: document.getElementById('sf-url').value.trim(),
+          api_key: document.getElementById('sf-api-key').value.trim(),
+          target_quality: document.getElementById('sf-target-quality').value.trim(),
+          profile_name: document.getElementById('sf-profile-name').value.trim(),
+          stop_mode: document.getElementById('sf-stop-mode').value,
+          enabled: document.getElementById('sf-enabled').value === 'true',
+        };
+        if (!payload.name) { showToast('Server name is required', false); return; }
+        try {
+          if (editMode) {
+            const orig = document.getElementById('sf-original-name').value;
+            await apiFetch(`/api/servers/${encodeURIComponent(orig)}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+            });
+            showToast(`Server '${payload.name}' updated`, true);
+          } else {
+            await apiFetch('/api/servers', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+            });
+            showToast(`Server '${payload.name}' added`, true);
+          }
+          hideServerForm();
+          await refreshServerList();
+        } catch (err) { showToast(err.message, false); }
+      }
+
+      async function deleteServer(name) {
+        if (!confirm(`Delete server '${name}'? This cannot be undone.`)) return;
+        try {
+          await apiFetch(`/api/servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+          showToast(`Server '${name}' deleted`, true);
+          await refreshServerList();
+        } catch (err) { showToast(err.message, false); }
+      }
+
+      async function testServer(name) {
+        try {
+          const data = await apiFetch(`/api/servers/${encodeURIComponent(name)}/test`, { method: 'POST' });
+          showToast(`${name}: ${data.message}`, true);
+          await refreshServerList();
+        } catch (err) {
+          showToast(`${name}: ${err.message}`, false);
+          await refreshServerList();
+        }
+      }
+
+      /* ═══ Settings: global ═══ */
+      async function saveGlobalSettings() {
+        const payload = {
+          poll_interval_seconds: parseInt(document.getElementById('gs-poll-interval').value, 10) || 300,
+          enabled: document.getElementById('gs-enabled').value === 'true',
+        };
+        try {
+          await apiFetch('/api/settings', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+          });
+          showToast('Global settings saved', true);
+        } catch (err) { showToast(err.message, false); }
+      }
+
+      /* ═══ Logs: dynamic source filter ═══ */
+      function updateLogSourceFilter(servers) {
+        const sel = document.getElementById('log-source-filter');
+        if (!sel) return;
+        const cur = sel.value;
+        const staticSet = new Set(['', 'Poller', 'App', 'Config']);
+        for (let i = sel.options.length - 1; i >= 0; i--) {
+          if (!staticSet.has(sel.options[i].value)) sel.remove(i);
+        }
+        // Insert server names after "All"
+        for (let idx = servers.length - 1; idx >= 0; idx--) {
+          const opt = document.createElement('option');
+          opt.value = servers[idx].name;
+          opt.textContent = servers[idx].name;
+          sel.insertBefore(opt, sel.options[1]);
+        }
+        sel.value = cur;
+      }
+
+      /* ═══ Change log ═══ */
       async function refreshChanges() {
         try {
           const resp = await fetch('/api/changes?limit=200', { cache: 'no-store' });
-          if (!resp.ok) { return; }
+          if (!resp.ok) return;
           const entries = await resp.json();
           const tbody = document.getElementById('change-log-body');
-          if (!tbody) { return; }
-
-          if (entries.length === 0) {
+          if (!tbody) return;
+          if (!entries.length) {
             tbody.innerHTML = '<tr><td colspan="5" style="color:#9ca3af;">No item changes logged yet.</td></tr>';
             return;
           }
-
           let html = '';
           for (const c of entries) {
             const ts = formatTimestamp(c.timestamp);
@@ -472,15 +742,11 @@
             const linkUrl = c.link_url || '';
             const quality = c.quality || '\u2014';
             const action = c.action || '';
-
             let titleHtml = '';
-            if (seriesTitle) {
-              titleHtml += `<span style="color:#9ca3af;">${escapeHtml(seriesTitle)}</span> \u2014 `;
-            }
+            if (seriesTitle) titleHtml += `<span style="color:#9ca3af;">${escapeHtml(seriesTitle)}</span> \u2014 `;
             titleHtml += linkUrl
               ? `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>`
               : escapeHtml(title);
-
             html += `<tr>
               <td>${escapeHtml(ts)}</td>
               <td><span class="src-badge ${sourceBadgeClass(svc)}">${escapeHtml(svc)}</span></td>
@@ -490,37 +756,34 @@
             </tr>`;
           }
           tbody.innerHTML = html;
-        } catch (_err) {
-          /* silent */
-        }
+        } catch (_) {}
       }
 
+      /* ═══ Logs ═══ */
       async function refreshLogs() {
         const level = document.getElementById('log-level-filter').value;
         const limit = document.getElementById('log-limit').value;
         const source = document.getElementById('log-source-filter').value;
         let url = `/api/logs?level=${level}&limit=${limit}`;
-        if (source) { url += `&source=${encodeURIComponent(source)}`; }
+        if (source) url += `&source=${encodeURIComponent(source)}`;
         try {
           const resp = await fetch(url, { cache: 'no-store' });
-          if (!resp.ok) { return; }
+          if (!resp.ok) return;
           const entries = await resp.json();
           const tbody = document.getElementById('log-table-body');
           const countLabel = document.getElementById('log-count-label');
-          if (countLabel) { countLabel.textContent = `${entries.length} entries`; }
-
-          if (entries.length === 0) {
+          if (countLabel) countLabel.textContent = `${entries.length} entries`;
+          if (!entries.length) {
             tbody.innerHTML = '<tr><td colspan="4" style="color:#9ca3af;">No log entries.</td></tr>';
             return;
           }
-
           let html = '';
-          for (const entry of entries) {
-            const ts = formatTimestamp(entry.timestamp);
-            const lvl = entry.level || 'INFO';
-            const src = entry.source || '';
-            const msg = entry.message || '';
-            const linkUrl = entry.link_url || '';
+          for (const e of entries) {
+            const ts = formatTimestamp(e.timestamp);
+            const lvl = e.level || 'INFO';
+            const src = e.source || '';
+            const msg = e.message || '';
+            const linkUrl = e.link_url || '';
             const linkHtml = linkUrl
               ? ` <a class="log-link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener" title="Open in ${escapeHtml(src)}">&#x1F517;</a>`
               : '';
@@ -532,22 +795,26 @@
             </tr>`;
           }
           tbody.innerHTML = html;
-        } catch (_err) {
-          /* silent */
-        }
+        } catch (_) {}
       }
 
       document.getElementById('log-level-filter').addEventListener('change', refreshLogs);
       document.getElementById('log-limit').addEventListener('change', refreshLogs);
       document.getElementById('log-source-filter').addEventListener('change', refreshLogs);
 
-      /* ═══ Init timers ═══ */
-      refreshBadges();
-      refreshChanges();
-      setInterval(refreshBadges, 5000);
+      /* ═══ Init ═══ */
+      async function init() {
+        await loadServers();
+        refreshStatus();
+        refreshChanges();
+        renderDashServerCards(cachedServers);
+        updateLogSourceFilter(cachedServers);
+      }
+      init();
+      setInterval(refreshStatus, 5000);
       setInterval(tickCountdown, 1000);
-      setInterval(function() { if (activeTab === 'dashboard') { refreshChanges(); } }, 5000);
-      setInterval(function() { if (activeTab === 'logs') { refreshLogs(); } }, 3000);
+      setInterval(function() { if (activeTab === 'dashboard') refreshChanges(); }, 5000);
+      setInterval(function() { if (activeTab === 'logs') refreshLogs(); }, 3000);
     </script>
   </body>
 </html>

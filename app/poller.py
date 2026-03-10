@@ -6,9 +6,9 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from .arr_client import ArrClientError, RadarrClient, SonarrClient
+from .arr_client import ArrClientError, BaseArrClient, RadarrClient, SonarrClient
 from .change_log import ChangeLogStore
-from .config import AppSettings, SettingsStore
+from .config import AppSettings, ServerConfig, SettingsStore
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +17,16 @@ logger = logging.getLogger(__name__)
 class PollStats:
     last_run: float | None = None
     last_error: str = ""
-    last_unmonitored: dict[str, int] = field(
-        default_factory=lambda: {"radarr": 0, "sonarr": 0}
-    )
+    last_unmonitored: dict[str, int] = field(default_factory=dict)
     recent_runs: deque[dict[str, object]] = field(default_factory=lambda: deque(maxlen=25))
-    service_status: dict[str, dict[str, object]] = field(
-        default_factory=lambda: {
-            "radarr": {"ok": None, "message": "Not checked yet", "checked_at": None},
-            "sonarr": {"ok": None, "message": "Not checked yet", "checked_at": None},
-        }
-    )
+    service_status: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
+def client_from_server(server: ServerConfig) -> BaseArrClient:
+    """Create an appropriate *arr client from a ServerConfig."""
+    if server.type == "sonarr":
+        return SonarrClient(server.url, server.api_key, label=server.name)
+    return RadarrClient(server.url, server.api_key, label=server.name)
 
 
 class ArrPoller:
@@ -34,17 +34,9 @@ class ArrPoller:
         self,
         settings_store: SettingsStore,
         change_log_store: ChangeLogStore,
-        default_radarr_url: str,
-        default_radarr_api_key: str,
-        default_sonarr_url: str,
-        default_sonarr_api_key: str,
     ) -> None:
         self.settings_store = settings_store
         self.change_log_store = change_log_store
-        self.default_radarr_url = default_radarr_url
-        self.default_radarr_api_key = default_radarr_api_key
-        self.default_sonarr_url = default_sonarr_url
-        self.default_sonarr_api_key = default_sonarr_api_key
         self.stats = PollStats()
         self._run_lock = threading.Lock()
         self._stop = threading.Event()
@@ -68,66 +60,73 @@ class ArrPoller:
             return
 
         started_at = time.time()
-        radarr_count = 0
-        sonarr_count = 0
         settings = self.settings_store.load()
-        radarr_client = self._radarr_client(settings)
-        sonarr_client = self._sonarr_client(settings)
+        unmonitored_counts: dict[str, int] = {}
+        service_errors: list[str] = []
 
         logger.info(
-            "Poll cycle started — interval %ds",
+            "Poll cycle started — interval %ds, %d server(s)",
             settings.poll_interval_seconds,
+            len(settings.servers),
         )
-
-        radarr_ok, radarr_message = self._check_service("radarr", radarr_client)
-        sonarr_ok, sonarr_message = self._check_service("sonarr", sonarr_client)
-
-        service_errors: list[str] = []
-        if not radarr_ok:
-            service_errors.append(f"Radarr: {radarr_message}")
-        if not sonarr_ok:
-            service_errors.append(f"Sonarr: {sonarr_message}")
 
         try:
             if not settings.enabled:
                 logger.info("Polling is disabled — skipping processing")
                 self.stats.last_error = ""
-                self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
+                self.stats.last_unmonitored = {}
             else:
-                radarr_count, radarr_profile_error = self._process_radarr(settings, radarr_client, radarr_ok)
-                sonarr_count, sonarr_profile_error = self._process_sonarr(settings, sonarr_client, sonarr_ok)
-                self.stats.last_unmonitored = {
-                    "radarr": radarr_count,
-                    "sonarr": sonarr_count,
-                }
-                if radarr_profile_error:
-                    service_errors.append(f"Radarr: {radarr_profile_error}")
-                if sonarr_profile_error:
-                    service_errors.append(f"Sonarr: {sonarr_profile_error}")
+                for server in settings.servers:
+                    if not server.enabled:
+                        logger.info("Server '%s' is disabled — skipping", server.name)
+                        unmonitored_counts[server.name] = 0
+                        continue
+
+                    client = client_from_server(server)
+                    ok, message = self._check_service(server.name, client)
+                    if not ok:
+                        service_errors.append(f"{server.name}: {message}")
+                        unmonitored_counts[server.name] = 0
+                        continue
+
+                    if server.type == "radarr":
+                        count, profile_error = self._process_radarr(server, client)
+                    elif server.type == "sonarr":
+                        count, profile_error = self._process_sonarr(server, client)
+                    else:
+                        logger.warning("Unknown server type '%s' for '%s'", server.type, server.name)
+                        count, profile_error = 0, ""
+
+                    unmonitored_counts[server.name] = count
+                    if profile_error:
+                        service_errors.append(f"{server.name}: {profile_error}")
+
+                self.stats.last_unmonitored = unmonitored_counts
                 self.stats.last_error = " | ".join(service_errors)
         except ArrClientError as exc:
             logger.error("Poll cycle failed — %s", exc)
             self.stats.last_error = str(exc)
-            self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
+            self.stats.last_unmonitored = {}
         except Exception as exc:
             logger.error("Unexpected error during poll: %s", exc, exc_info=True)
             self.stats.last_error = f"Unexpected error: {exc}"
-            self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
+            self.stats.last_unmonitored = {}
         finally:
             self.stats.last_run = time.time()
-            self._record_run(started_at, radarr_count, sonarr_count, self.stats.last_error)
+            total_unmonitored = sum(unmonitored_counts.values())
+            self._record_run(started_at, unmonitored_counts, self.stats.last_error)
             duration = round(self.stats.last_run - started_at, 3)
+            summary_parts = [f"{name}={count}" for name, count in unmonitored_counts.items()]
             logger.info(
-                "Poll cycle completed in %.3fs — unmonitored: Radarr=%d, Sonarr=%d",
-                duration, radarr_count, sonarr_count,
+                "Poll cycle completed in %.3fs — unmonitored: %s (total %d)",
+                duration, ", ".join(summary_parts) if summary_parts else "none", total_unmonitored,
             )
             self._run_lock.release()
 
     def _record_run(
         self,
         started_at: float,
-        radarr_count: int,
-        sonarr_count: int,
+        unmonitored_counts: dict[str, int],
         error: str,
     ) -> None:
         self.stats.recent_runs.appendleft(
@@ -135,8 +134,8 @@ class ArrPoller:
                 "started_at": started_at,
                 "finished_at": self.stats.last_run,
                 "duration_seconds": round((self.stats.last_run or started_at) - started_at, 3),
-                "radarr_unmonitored": radarr_count,
-                "sonarr_unmonitored": sonarr_count,
+                "unmonitored": unmonitored_counts,
+                "total_unmonitored": sum(unmonitored_counts.values()),
                 "error": error,
             }
         )
@@ -173,20 +172,16 @@ class ArrPoller:
 
     def _process_radarr(
         self,
-        settings: AppSettings,
-        radarr_client: RadarrClient,
-        radarr_ok: bool,
+        server: ServerConfig,
+        radarr_client: RadarrClient | BaseArrClient,
     ) -> tuple[int, str]:
-        if not radarr_ok:
-            return 0, ""
-
-        target_quality = settings.radarr_target_quality.strip()
+        target_quality = server.target_quality.strip()
         if not target_quality:
             logger.warning(
                 "Target quality text is not set — skipping processing",
                 extra={"source_label": radarr_client.label},
             )
-            return 0, "Set Radarr target quality text"
+            return 0, f"Set target quality text for {server.name}"
 
         count = 0
         items = radarr_client.get_items()
@@ -219,7 +214,7 @@ class ArrPoller:
                 )
                 radarr_client.unmonitor_item(item)
                 self._log_change(
-                    "radarr", item,
+                    server.name, item,
                     quality_name=quality_name,
                     link_url=movie_url,
                 )
@@ -228,20 +223,16 @@ class ArrPoller:
 
     def _process_sonarr(
         self,
-        settings: AppSettings,
-        sonarr_client: SonarrClient,
-        sonarr_ok: bool,
+        server: ServerConfig,
+        sonarr_client: SonarrClient | BaseArrClient,
     ) -> tuple[int, str]:
-        if not sonarr_ok:
-            return 0, ""
-
-        target_quality = settings.sonarr_target_quality.strip()
+        target_quality = server.target_quality.strip()
         if not target_quality:
             logger.warning(
                 "Target quality text is not set — skipping processing",
                 extra={"source_label": sonarr_client.label},
             )
-            return 0, "Set Sonarr target quality text"
+            return 0, f"Set target quality text for {server.name}"
 
         count = 0
         series_list = sonarr_client.get_items()
@@ -301,6 +292,7 @@ class ArrPoller:
                 sonarr_client.unmonitor_episode(episode, series_title=series_title, series_slug=series_slug)
                 self._log_sonarr_episode_change(
                     episode, series_id,
+                    server_name=server.name,
                     series_title=series_title,
                     quality_name=quality_name,
                     link_url=series_url,
@@ -308,17 +300,7 @@ class ArrPoller:
                 count += 1
         return count, ""
 
-    def _radarr_client(self, settings: AppSettings) -> RadarrClient:
-        base_url = settings.radarr_url or self.default_radarr_url
-        api_key = settings.radarr_api_key or self.default_radarr_api_key
-        return RadarrClient(base_url, api_key, label="Radarr")
-
-    def _sonarr_client(self, settings: AppSettings) -> SonarrClient:
-        base_url = settings.sonarr_url or self.default_sonarr_url
-        api_key = settings.sonarr_api_key or self.default_sonarr_api_key
-        return SonarrClient(base_url, api_key, label="Sonarr")
-
-    def _check_service(self, service: str, client: RadarrClient | SonarrClient) -> tuple[bool, str]:
+    def _check_service(self, service: str, client: RadarrClient | SonarrClient | BaseArrClient) -> tuple[bool, str]:
         try:
             profiles = client.get_profiles()
             profile_names = ", ".join(p.name for p in profiles)
@@ -375,6 +357,7 @@ class ArrPoller:
         episode: dict[str, object],
         series_id: int,
         *,
+        server_name: str = "Sonarr",
         series_title: str = "",
         quality_name: str = "",
         link_url: str = "",
@@ -389,7 +372,7 @@ class ArrPoller:
             label = f"{label} - {title.strip()}"
         self.change_log_store.append(
             {
-                "service": "Sonarr",
+                "service": server_name,
                 "series_title": series_title,
                 "item_id": episode.get("id"),
                 "title": label,
@@ -401,7 +384,7 @@ class ArrPoller:
 
     def _log_change(
         self,
-        service: str,
+        server_name: str,
         item: dict[str, object],
         *,
         quality_name: str = "",
@@ -412,7 +395,7 @@ class ArrPoller:
         display_title = f"{title} ({year})" if year else str(title)
         self.change_log_store.append(
             {
-                "service": service.capitalize(),
+                "service": server_name,
                 "item_id": item.get("id"),
                 "title": display_title,
                 "quality": quality_name,

@@ -1,70 +1,84 @@
 # arr-unmonitor
 
-Dockerized Python app that:
+Dockerized Python app that automatically unmonitors completed media items in Radarr and Sonarr once they reach a target quality.
 
-- Connects to Radarr + Sonarr APIs
-- Pulls available quality profiles
-- Shows separate Radarr and Sonarr tiles in the UI
-- Lets you choose profile levels in each tile
-- Polls in the background
-- Unmonitors matching completed items automatically
+## Features
+
+- **Multi-server support** — configure multiple Radarr and Sonarr instances (e.g. Radarr-4K, Radarr-1080p, Sonarr-Anime)
+- **Web UI** with three tabs: Dashboard, Settings, and Logs
+- **Settings tab** — full server CRUD: add, edit, test connectivity, delete servers via the UI
+- **Dashboard** — summary cards per server with live status badges, worker controls, recent runs, and change log
+- **Background poller** — configurable interval, per-server enable/disable
+- **Quality matching** — unmonitors items whose file quality name contains the configured target text
+- **Change log** — persistent JSONL log of every unmonitor action
 
 ## UI Port
 
-- TCP `5200`
+- TCP `5200` (configurable via `PORT` env var)
 
 ## Persistent Storage
 
-- Mount local storage to `/config`
-- App settings are saved in `/config/settings.json`
+Mount a volume to `/config`. The app stores:
 
-## Required Environment Variables
+| File | Purpose |
+|------|---------|
+| `/config/settings.json` | All server configs + global settings |
+| `/config/change-log.jsonl` | Item-level change log |
+| `/config/app-log.jsonl` | Application log |
 
-- `RADARR_URL` (example: `http://radarr:7878`)
-- `RADARR_API_KEY`
-- `SONARR_URL` (example: `http://sonarr:8989`)
-- `SONARR_API_KEY`
+## Environment Variables
 
-You can also set these in the UI and save them to `/config/settings.json`.
-If both are present, saved UI values are used.
+On **first run** with empty settings, the app seeds servers from these env vars:
 
-## UI Layout
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `RADARR_URL` | `http://radarr:7878` | Seeds a "Radarr" server entry |
+| `RADARR_API_KEY` | `abc123...` | API key for the seeded Radarr |
+| `SONARR_URL` | `http://sonarr:8989` | Seeds a "Sonarr" server entry |
+| `SONARR_API_KEY` | `def456...` | API key for the seeded Sonarr |
 
-- Dark gray theme
-- Separate Radarr and Sonarr tiles
-- Each tile has independent Save + Test connectivity actions
-- Live connectivity badge per tile (connected/disconnected), refreshed continuously
-- Each tile has explicit `Stop at quality text` (example: `Remux-2160p`)
+After first run, **manage all servers in the Settings tab**. Env vars are not re-read.
 
 Optional:
 
-- `SETTINGS_PATH` (default `/config/settings.json`)
-- `PORT` (default `5200`)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SETTINGS_PATH` | `/config/settings.json` | Path for persistent settings |
+| `CHANGE_LOG_PATH` | `/config/change-log.jsonl` | Path for change log |
+| `LOG_PATH` | `/config/app-log.jsonl` | Path for application log |
+| `PORT` | `5200` | HTTP listen port |
 
 ## Run with Docker Compose
 
-1. Edit `docker-compose.yml` and set API keys.
+1. Edit `docker-compose.yml` and set API keys for initial seeding.
 2. Start:
 
 ```bash
 docker compose up -d --build
 ```
 
-3. Open UI:
-
-`http://localhost:5200`
+3. Open UI: `http://localhost:5200`
+4. Go to **Settings** tab to manage servers, adjust quality targets, and configure polling.
 
 ## How Matching Works
 
-- Radarr: unmonitor when
-  - item is monitored
-  - item has a file (`hasFile = true`)
-  - current movie file quality name contains configured quality text
-- Sonarr: unmonitor when
-  - episode is monitored
-  - episode has a downloaded episode file
-  - that episode file quality name contains configured quality text
-  - action is applied at episode level (`monitored=false` for the episode, series remains monitored)
+- **Radarr**: unmonitors a movie when it is monitored, has a file, and the file's quality name contains the target text
+- **Sonarr**: unmonitors individual episodes (series stays monitored) when the episode is monitored, has a downloaded file, and that file's quality name contains the target text
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/servers` | List all configured servers |
+| `POST` | `/api/servers` | Add a new server |
+| `PUT` | `/api/servers/<name>` | Update a server (supports rename) |
+| `DELETE` | `/api/servers/<name>` | Delete a server |
+| `POST` | `/api/servers/<name>/test` | Test server connectivity |
+| `GET/PUT` | `/api/settings` | Global settings (poll interval, enabled) |
+| `GET` | `/api/changes` | Recent change log entries |
+| `GET` | `/api/logs` | Application log entries (filterable) |
+| `GET` | `/status` | Full runtime status (JSON) |
+| `GET` | `/health` | Health check |
 
 ## GHCR Auto Build on Push
 
@@ -79,13 +93,13 @@ Image tags include branch/tag refs and commit SHA.
 
 ## Troubleshooting
 
-- JSON status endpoint: `/status`
-- Includes current runtime settings, last run result, recent run history, and recent item-level changes.
-- Use the "Clear history" button in the UI to reset in-memory recent runs.
-- Use each tile's "Test" button to verify its URL + API key.
+- JSON status endpoint: `/status` — includes runtime state, per-server status, recent runs, and changes
+- Use the **Settings** tab to test connectivity per server
+- Use "Clear history" / "Clear change log" buttons on the Dashboard
+- Application logs viewable in the **Logs** tab with level and source filtering
 
 ## Change Log
 
-- Every successful unmonitor action is appended to `/config/change-log.jsonl`.
-- UI shows a "Change log" table with service, title, profile, action, and timestamp.
-- Use "Clear change log" to reset the persisted log file.
+- Every successful unmonitor action is appended to `/config/change-log.jsonl`
+- Dashboard shows a change log table with service, title, quality, action, and timestamp
+- Use "Clear change log" to reset the persisted log file

@@ -9,11 +9,41 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from .arr_client import ArrClientError, RadarrClient, SonarrClient
 from .change_log import ChangeLogStore
-from .config import AppSettings, SettingsStore, env
+from .config import AppSettings, ServerConfig, SettingsStore, env, VALID_SERVER_TYPES
 from .log_manager import setup_logging
-from .poller import ArrPoller
+from .poller import ArrPoller, client_from_server
 
 logger = logging.getLogger(__name__)
+
+
+def _seed_servers_from_env(settings: AppSettings, settings_store: SettingsStore) -> AppSettings:
+    """On first run with no servers, seed from RADARR_*/SONARR_* env vars."""
+    if settings.servers:
+        return settings
+
+    radarr_url = env("RADARR_URL")
+    radarr_key = env("RADARR_API_KEY")
+    sonarr_url = env("SONARR_URL")
+    sonarr_key = env("SONARR_API_KEY")
+
+    seeded = False
+    if radarr_url or radarr_key:
+        settings.servers.append(
+            ServerConfig(name="Radarr", type="radarr", url=radarr_url, api_key=radarr_key)
+        )
+        logger.info("Seeded Radarr server from environment variables")
+        seeded = True
+    if sonarr_url or sonarr_key:
+        settings.servers.append(
+            ServerConfig(name="Sonarr", type="sonarr", url=sonarr_url, api_key=sonarr_key)
+        )
+        logger.info("Seeded Sonarr server from environment variables")
+        seeded = True
+
+    if seeded:
+        settings_store.save(settings)
+
+    return settings
 
 
 def create_app() -> Flask:
@@ -24,69 +54,24 @@ def create_app() -> Flask:
 
     settings_store = SettingsStore(env("SETTINGS_PATH", "/config/settings.json"))
     change_log_store = ChangeLogStore(env("CHANGE_LOG_PATH", "/config/change-log.jsonl"))
-    default_radarr_url = env("RADARR_URL")
-    default_radarr_api_key = env("RADARR_API_KEY")
-    default_sonarr_url = env("SONARR_URL")
-    default_sonarr_api_key = env("SONARR_API_KEY")
 
-    poller = ArrPoller(
-        settings_store,
-        change_log_store,
-        default_radarr_url,
-        default_radarr_api_key,
-        default_sonarr_url,
-        default_sonarr_api_key,
-    )
+    # Seed servers from env vars on first run (empty settings)
+    initial_settings = settings_store.load()
+    _seed_servers_from_env(initial_settings, settings_store)
+
+    poller = ArrPoller(settings_store, change_log_store)
     poller.start()
     logger.info("Application started — poller running, UI on port %s", os.getenv("PORT", "5200"))
 
-    def effective_settings(stored: AppSettings) -> AppSettings:
-        return AppSettings(
-            radarr_url=stored.radarr_url or default_radarr_url,
-            radarr_api_key=stored.radarr_api_key or default_radarr_api_key,
-            sonarr_url=stored.sonarr_url or default_sonarr_url,
-            sonarr_api_key=stored.sonarr_api_key or default_sonarr_api_key,
-            radarr_profile_name=stored.radarr_profile_name,
-            sonarr_profile_name=stored.sonarr_profile_name,
-            radarr_target_quality=stored.radarr_target_quality,
-            sonarr_target_quality=stored.sonarr_target_quality,
-            radarr_stop_mode=stored.radarr_stop_mode,
-            sonarr_stop_mode=stored.sonarr_stop_mode,
-            radarr_profile_id=stored.radarr_profile_id,
-            sonarr_profile_id=stored.sonarr_profile_id,
-            poll_interval_seconds=stored.poll_interval_seconds,
-            enabled=stored.enabled,
-        )
-
-    def clients_from_settings(settings: AppSettings) -> tuple[RadarrClient, SonarrClient]:
-        return (
-            RadarrClient(settings.radarr_url, settings.radarr_api_key),
-            SonarrClient(settings.sonarr_url, settings.sonarr_api_key),
-        )
+    # ──────────────────────────────────────────────────────
+    # Pages
+    # ──────────────────────────────────────────────────────
 
     @app.route("/", methods=["GET"])
     def index():
-        settings = effective_settings(settings_store.load())
+        settings = settings_store.load()
         notice = request.args.get("notice", "")
         error = request.args.get("error", "")
-        radarr_profiles = []
-        sonarr_profiles = []
-        profile_error = ""
-        radarr_client, sonarr_client = clients_from_settings(settings)
-
-        try:
-            radarr_profiles = radarr_client.get_profiles()
-        except ArrClientError as exc:
-            profile_error = f"Radarr profiles unavailable: {exc}"
-
-        try:
-            sonarr_profiles = sonarr_client.get_profiles()
-        except ArrClientError as exc:
-            profile_error = (
-                f"{profile_error} | Sonarr profiles unavailable: {exc}"
-                if profile_error
-                else f"Sonarr profiles unavailable: {exc}"
-            )
 
         last_run = "Never"
         if poller.stats.last_run:
@@ -105,10 +90,7 @@ def create_app() -> Flask:
         return render_template(
             "index.html",
             settings=settings,
-            radarr_profiles=radarr_profiles,
-            sonarr_profiles=sonarr_profiles,
             service_status=poller.stats.service_status,
-            profile_error=profile_error,
             notice=notice,
             error=error,
             stats=poller.stats,
@@ -116,137 +98,153 @@ def create_app() -> Flask:
             recent_runs=recent_runs,
         )
 
-    @app.post("/settings/radarr")
-    def save_radarr_settings():
-        current = settings_store.load()
-        updated = AppSettings(
-            radarr_url=request.form.get("radarr_url", "").strip(),
-            radarr_api_key=request.form.get("radarr_api_key", "").strip(),
-            sonarr_url=current.sonarr_url,
-            sonarr_api_key=current.sonarr_api_key,
-            radarr_profile_name=request.form.get("radarr_profile_name", "").strip(),
-            sonarr_profile_name=current.sonarr_profile_name,
-            radarr_target_quality=request.form.get("radarr_target_quality", "").strip(),
-            sonarr_target_quality=current.sonarr_target_quality,
-            radarr_stop_mode=request.form.get("radarr_stop_mode", "cutoff").strip() or "cutoff",
-            sonarr_stop_mode=current.sonarr_stop_mode,
-            radarr_profile_id=current.radarr_profile_id,
-            sonarr_profile_id=current.sonarr_profile_id,
-            poll_interval_seconds=current.poll_interval_seconds,
-            enabled=current.enabled,
+    # ──────────────────────────────────────────────────────
+    # Server CRUD API
+    # ──────────────────────────────────────────────────────
+
+    @app.route("/api/servers", methods=["GET"])
+    def api_servers():
+        settings = settings_store.load()
+        servers = []
+        for s in settings.servers:
+            servers.append({
+                "name": s.name,
+                "type": s.type,
+                "url": s.url,
+                "api_key": s.api_key[:4] + "***" if len(s.api_key) > 4 else "***",
+                "api_key_full": s.api_key,
+                "target_quality": s.target_quality,
+                "profile_name": s.profile_name,
+                "stop_mode": s.stop_mode,
+                "profile_id": s.profile_id,
+                "enabled": s.enabled,
+                "status": poller.stats.service_status.get(s.name, {
+                    "ok": None, "message": "Not checked yet", "checked_at": None,
+                }),
+            })
+        return jsonify(servers)
+
+    @app.route("/api/servers", methods=["POST"])
+    def api_add_server():
+        data = request.get_json(silent=True) or {}
+        name = str(data.get("name", "")).strip()
+        server_type = str(data.get("type", "")).strip().lower()
+
+        if not name:
+            return jsonify({"error": "Server name is required"}), 400
+        if server_type not in VALID_SERVER_TYPES:
+            return jsonify({"error": f"Type must be one of: {', '.join(VALID_SERVER_TYPES)}"}), 400
+
+        settings = settings_store.load()
+        if settings.get_server_by_name(name):
+            return jsonify({"error": f"A server named '{name}' already exists"}), 409
+
+        server = ServerConfig(
+            name=name,
+            type=server_type,
+            url=str(data.get("url", "")).strip(),
+            api_key=str(data.get("api_key", "")).strip(),
+            target_quality=str(data.get("target_quality", "")).strip(),
+            profile_name=str(data.get("profile_name", "")).strip(),
+            stop_mode=str(data.get("stop_mode", "cutoff")).strip() or "cutoff",
+            enabled=bool(data.get("enabled", True)),
         )
-        settings_store.save(updated)
-        return redirect(url_for("index", notice="Radarr settings saved"))
+        settings.servers.append(server)
+        settings_store.save(settings)
+        logger.info("Server '%s' (%s) added", name, server_type)
+        return jsonify({"ok": True, "message": f"Server '{name}' added"}), 201
 
-    @app.post("/settings/sonarr")
-    def save_sonarr_settings():
-        current = settings_store.load()
-        updated = AppSettings(
-            radarr_url=current.radarr_url,
-            radarr_api_key=current.radarr_api_key,
-            sonarr_url=request.form.get("sonarr_url", "").strip(),
-            sonarr_api_key=request.form.get("sonarr_api_key", "").strip(),
-            radarr_profile_name=current.radarr_profile_name,
-            sonarr_profile_name=request.form.get("sonarr_profile_name", "").strip(),
-            radarr_target_quality=current.radarr_target_quality,
-            sonarr_target_quality=request.form.get("sonarr_target_quality", "").strip(),
-            radarr_stop_mode=current.radarr_stop_mode,
-            sonarr_stop_mode=request.form.get("sonarr_stop_mode", "cutoff").strip() or "cutoff",
-            radarr_profile_id=current.radarr_profile_id,
-            sonarr_profile_id=current.sonarr_profile_id,
-            poll_interval_seconds=current.poll_interval_seconds,
-            enabled=current.enabled,
-        )
-        settings_store.save(updated)
-        return redirect(url_for("index", notice="Sonarr settings saved"))
+    @app.route("/api/servers/<name>", methods=["PUT"])
+    def api_update_server(name: str):
+        data = request.get_json(silent=True) or {}
+        settings = settings_store.load()
+        server = settings.get_server_by_name(name)
+        if not server:
+            return jsonify({"error": f"Server '{name}' not found"}), 404
 
-    @app.post("/settings")
-    def save_settings():
-        current = settings_store.load()
+        # Allow renaming
+        new_name = str(data.get("name", name)).strip()
+        if new_name != name and settings.get_server_by_name(new_name):
+            return jsonify({"error": f"A server named '{new_name}' already exists"}), 409
 
-        updated = AppSettings(
-            radarr_url=current.radarr_url,
-            radarr_api_key=current.radarr_api_key,
-            sonarr_url=current.sonarr_url,
-            sonarr_api_key=current.sonarr_api_key,
-            radarr_profile_name=current.radarr_profile_name,
-            sonarr_profile_name=current.sonarr_profile_name,
-            radarr_target_quality=current.radarr_target_quality,
-            sonarr_target_quality=current.sonarr_target_quality,
-            radarr_stop_mode=current.radarr_stop_mode,
-            sonarr_stop_mode=current.sonarr_stop_mode,
-            radarr_profile_id=current.radarr_profile_id,
-            sonarr_profile_id=current.sonarr_profile_id,
-            poll_interval_seconds=max(int(request.form.get("poll_interval_seconds", 300)), 30),
-            enabled=request.form.get("enabled") == "on",
-        )
+        new_type = str(data.get("type", server.type)).strip().lower()
+        if new_type not in VALID_SERVER_TYPES:
+            return jsonify({"error": f"Type must be one of: {', '.join(VALID_SERVER_TYPES)}"}), 400
 
-        if current != updated:
-            settings_store.save(updated)
+        server.name = new_name
+        server.type = new_type
+        server.url = str(data.get("url", server.url)).strip()
+        server.api_key = str(data.get("api_key", server.api_key)).strip()
+        server.target_quality = str(data.get("target_quality", server.target_quality)).strip()
+        server.profile_name = str(data.get("profile_name", server.profile_name)).strip()
+        server.stop_mode = str(data.get("stop_mode", server.stop_mode)).strip() or "cutoff"
+        server.enabled = bool(data.get("enabled", server.enabled))
+        # Reset profile_id when profile_name changes
+        server.profile_id = None
 
-        return redirect(url_for("index", notice="Settings saved"))
+        settings_store.save(settings)
+        logger.info("Server '%s' updated", new_name)
+        return jsonify({"ok": True, "message": f"Server '{new_name}' updated"})
 
-    @app.post("/test/radarr")
-    def test_radarr():
-        current = settings_store.load()
-        updated = AppSettings(
-            radarr_url=request.form.get("radarr_url", "").strip(),
-            radarr_api_key=request.form.get("radarr_api_key", "").strip(),
-            sonarr_url=current.sonarr_url,
-            sonarr_api_key=current.sonarr_api_key,
-            radarr_profile_name=request.form.get("radarr_profile_name", "").strip(),
-            sonarr_profile_name=current.sonarr_profile_name,
-            radarr_target_quality=request.form.get("radarr_target_quality", "").strip(),
-            sonarr_target_quality=current.sonarr_target_quality,
-            radarr_stop_mode=request.form.get("radarr_stop_mode", "cutoff").strip() or "cutoff",
-            sonarr_stop_mode=current.sonarr_stop_mode,
-            radarr_profile_id=current.radarr_profile_id,
-            sonarr_profile_id=current.sonarr_profile_id,
-            poll_interval_seconds=current.poll_interval_seconds,
-            enabled=current.enabled,
-        )
-        settings_store.save(updated)
+    @app.route("/api/servers/<name>", methods=["DELETE"])
+    def api_delete_server(name: str):
+        settings = settings_store.load()
+        server = settings.get_server_by_name(name)
+        if not server:
+            return jsonify({"error": f"Server '{name}' not found"}), 404
 
-        settings = effective_settings(updated)
-        client = RadarrClient(settings.radarr_url, settings.radarr_api_key)
+        settings.servers.remove(server)
+        settings_store.save(settings)
+        # Clean up service status
+        poller.stats.service_status.pop(name, None)
+        poller.stats.last_unmonitored.pop(name, None)
+        logger.info("Server '%s' deleted", name)
+        return jsonify({"ok": True, "message": f"Server '{name}' deleted"})
+
+    @app.route("/api/servers/<name>/test", methods=["POST"])
+    def api_test_server(name: str):
+        settings = settings_store.load()
+        server = settings.get_server_by_name(name)
+        if not server:
+            return jsonify({"error": f"Server '{name}' not found"}), 404
+
+        client = client_from_server(server)
         try:
             count = len(client.get_profiles())
-            poller.update_service_status("radarr", True, f"Connected ({count} profiles)")
-            return redirect(url_for("index", notice=f"Radarr saved and connected ({count} profiles)"))
+            poller.update_service_status(name, True, f"Connected ({count} profiles)")
+            return jsonify({"ok": True, "message": f"Connected ({count} profiles)"})
         except ArrClientError as exc:
-            poller.update_service_status("radarr", False, str(exc))
-            return redirect(url_for("index", error=f"Radarr saved but test failed: {exc}"))
+            poller.update_service_status(name, False, str(exc))
+            return jsonify({"ok": False, "message": str(exc)}), 502
 
-    @app.post("/test/sonarr")
-    def test_sonarr():
-        current = settings_store.load()
-        updated = AppSettings(
-            radarr_url=current.radarr_url,
-            radarr_api_key=current.radarr_api_key,
-            sonarr_url=request.form.get("sonarr_url", "").strip(),
-            sonarr_api_key=request.form.get("sonarr_api_key", "").strip(),
-            radarr_profile_name=current.radarr_profile_name,
-            sonarr_profile_name=request.form.get("sonarr_profile_name", "").strip(),
-            radarr_target_quality=current.radarr_target_quality,
-            sonarr_target_quality=request.form.get("sonarr_target_quality", "").strip(),
-            radarr_stop_mode=current.radarr_stop_mode,
-            sonarr_stop_mode=request.form.get("sonarr_stop_mode", "cutoff").strip() or "cutoff",
-            radarr_profile_id=current.radarr_profile_id,
-            sonarr_profile_id=current.sonarr_profile_id,
-            poll_interval_seconds=current.poll_interval_seconds,
-            enabled=current.enabled,
-        )
-        settings_store.save(updated)
+    # ──────────────────────────────────────────────────────
+    # Global settings
+    # ──────────────────────────────────────────────────────
 
-        settings = effective_settings(updated)
-        client = SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
-        try:
-            count = len(client.get_profiles())
-            poller.update_service_status("sonarr", True, f"Connected ({count} profiles)")
-            return redirect(url_for("index", notice=f"Sonarr saved and connected ({count} profiles)"))
-        except ArrClientError as exc:
-            poller.update_service_status("sonarr", False, str(exc))
-            return redirect(url_for("index", error=f"Sonarr saved but test failed: {exc}"))
+    @app.route("/api/settings", methods=["GET"])
+    def api_get_settings():
+        settings = settings_store.load()
+        return jsonify({
+            "poll_interval_seconds": settings.poll_interval_seconds,
+            "enabled": settings.enabled,
+        })
+
+    @app.route("/api/settings", methods=["PUT"])
+    def api_save_settings():
+        data = request.get_json(silent=True) or {}
+        settings = settings_store.load()
+
+        if "poll_interval_seconds" in data:
+            settings.poll_interval_seconds = max(int(data["poll_interval_seconds"]), 30)
+        if "enabled" in data:
+            settings.enabled = bool(data["enabled"])
+
+        settings_store.save(settings)
+        return jsonify({"ok": True, "message": "Settings saved"})
+
+    # ──────────────────────────────────────────────────────
+    # Worker actions
+    # ──────────────────────────────────────────────────────
 
     @app.post("/run-now")
     def run_now():
@@ -262,6 +260,10 @@ def create_app() -> Flask:
     def clear_change_log():
         change_log_store.clear()
         return redirect(url_for("index", notice="Change log cleared"))
+
+    # ──────────────────────────────────────────────────────
+    # Data APIs
+    # ──────────────────────────────────────────────────────
 
     @app.route("/api/changes", methods=["GET"])
     def api_changes():
@@ -282,13 +284,17 @@ def create_app() -> Flask:
         logger.info("Application logs cleared")
         return redirect(url_for("index", _anchor="logs"))
 
+    # ──────────────────────────────────────────────────────
+    # Health & Status
+    # ──────────────────────────────────────────────────────
+
     @app.route("/health", methods=["GET"])
     def health():
         return jsonify({"status": "ok"})
 
     @app.route("/status", methods=["GET"])
     def status():
-        settings = effective_settings(settings_store.load())
+        settings = settings_store.load()
         payload = poller.status_payload()
         now = datetime.now().timestamp()
         next_run_at: float | None = None
@@ -308,19 +314,26 @@ def create_app() -> Flask:
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         unmonitored_today = change_log_store.count_since(today_start)
 
+        payload["servers"] = []
+        for s in settings.servers:
+            srv_status = poller.stats.service_status.get(s.name, {
+                "ok": None, "message": "Not checked yet", "checked_at": None,
+            })
+            payload["servers"].append({
+                "name": s.name,
+                "type": s.type,
+                "enabled": s.enabled,
+                "status": srv_status,
+                "last_unmonitored": poller.stats.last_unmonitored.get(s.name, 0),
+            })
+
+        # Legacy compat: keep service_status as a flat dict
+        payload["service_status"] = poller.stats.service_status
+
         payload["settings"] = {
-            "radarr_url": settings.radarr_url,
-            "sonarr_url": settings.sonarr_url,
-            "radarr_profile_name": settings.radarr_profile_name,
-            "sonarr_profile_name": settings.sonarr_profile_name,
-            "radarr_target_quality": settings.radarr_target_quality,
-            "sonarr_target_quality": settings.sonarr_target_quality,
-            "radarr_stop_mode": settings.radarr_stop_mode,
-            "sonarr_stop_mode": settings.sonarr_stop_mode,
-            "radarr_profile_id": settings.radarr_profile_id,
-            "sonarr_profile_id": settings.sonarr_profile_id,
             "poll_interval_seconds": settings.poll_interval_seconds,
             "enabled": settings.enabled,
+            "server_count": len(settings.servers),
         }
         payload["runtime"] = {
             "is_running": poller.is_running(),
