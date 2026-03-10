@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,12 +54,14 @@ class SettingsStore:
                 poll_interval_seconds=int(raw.get("poll_interval_seconds", 300)),
                 enabled=bool(raw.get("enabled", True)),
             )
-        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
+            logger.warning("Failed to load settings from %s, using defaults: %s", self.path, exc)
             return AppSettings()
 
     def save(self, settings: AppSettings) -> None:
         with self.path.open("w", encoding="utf-8") as file:
             json.dump(asdict(settings), file, indent=2)
+        logger.info("Settings saved to %s", self.path)
 
 
 def env(name: str, default: str = "") -> str:

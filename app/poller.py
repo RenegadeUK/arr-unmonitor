@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -8,6 +9,8 @@ from dataclasses import dataclass, field
 from .arr_client import ArrClientError, RadarrClient, SonarrClient
 from .change_log import ChangeLogStore
 from .config import AppSettings, SettingsStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,6 +64,7 @@ class ArrPoller:
 
     def run_once(self) -> None:
         if not self._run_lock.acquire(blocking=False):
+            logger.debug("Poll skipped — already running")
             return
 
         started_at = time.time()
@@ -69,6 +73,11 @@ class ArrPoller:
         settings = self.settings_store.load()
         radarr_client = self._radarr_client(settings)
         sonarr_client = self._sonarr_client(settings)
+
+        logger.info(
+            "Poll cycle started — interval %ds",
+            settings.poll_interval_seconds,
+        )
 
         radarr_ok, radarr_message = self._check_service("radarr", radarr_client)
         sonarr_ok, sonarr_message = self._check_service("sonarr", sonarr_client)
@@ -81,6 +90,7 @@ class ArrPoller:
 
         try:
             if not settings.enabled:
+                logger.info("Polling is disabled — skipping processing")
                 self.stats.last_error = ""
                 self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
             else:
@@ -96,14 +106,21 @@ class ArrPoller:
                     service_errors.append(f"Sonarr: {sonarr_profile_error}")
                 self.stats.last_error = " | ".join(service_errors)
         except ArrClientError as exc:
+            logger.error("Poll cycle failed — %s", exc)
             self.stats.last_error = str(exc)
             self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
         except Exception as exc:
+            logger.error("Unexpected error during poll: %s", exc, exc_info=True)
             self.stats.last_error = f"Unexpected error: {exc}"
             self.stats.last_unmonitored = {"radarr": 0, "sonarr": 0}
         finally:
             self.stats.last_run = time.time()
             self._record_run(started_at, radarr_count, sonarr_count, self.stats.last_error)
+            duration = round(self.stats.last_run - started_at, 3)
+            logger.info(
+                "Poll cycle completed in %.3fs — unmonitored: Radarr=%d, Sonarr=%d",
+                duration, radarr_count, sonarr_count,
+            )
             self._run_lock.release()
 
     def _record_run(
@@ -165,10 +182,23 @@ class ArrPoller:
 
         target_quality = settings.radarr_target_quality.strip()
         if not target_quality:
+            logger.warning(
+                "Target quality text is not set — skipping processing",
+                extra={"source_label": radarr_client.label},
+            )
             return 0, "Set Radarr target quality text"
 
         count = 0
-        for item in radarr_client.get_items():
+        items = radarr_client.get_items()
+        monitored_with_file = sum(
+            1 for i in items if i.get("monitored") and i.get("hasFile")
+        )
+        logger.info(
+            "Evaluating %d movies (%d monitored with files, target quality: '%s')",
+            len(items), monitored_with_file, target_quality,
+            extra={"source_label": radarr_client.label},
+        )
+        for item in items:
             profile_id = item.get(radarr_client.profile_key)
             quality_name = self._radarr_quality_name(item)
             quality_match = self._quality_text_matches(quality_name, target_quality)
@@ -178,8 +208,21 @@ class ArrPoller:
                 and item.get("hasFile", False)
                 and quality_match
             ):
+                title = item.get("title", "Unknown")
+                year = item.get("year", "")
+                slug = item.get("titleSlug", "")
+                movie_url = f"{radarr_client.base_url}/movie/{slug}" if slug else ""
+                logger.info(
+                    "Unmonitoring movie '%s' (%s) — file quality '%s' matches target '%s'",
+                    title, year, quality_name, target_quality,
+                    extra={"source_label": radarr_client.label, "link_url": movie_url},
+                )
                 radarr_client.unmonitor_item(item)
-                self._log_change("radarr", item, profile_id if isinstance(profile_id, int) else None)
+                self._log_change(
+                    "radarr", item,
+                    quality_name=quality_name,
+                    link_url=movie_url,
+                )
                 count += 1
         return count, ""
 
@@ -194,17 +237,37 @@ class ArrPoller:
 
         target_quality = settings.sonarr_target_quality.strip()
         if not target_quality:
+            logger.warning(
+                "Target quality text is not set — skipping processing",
+                extra={"source_label": sonarr_client.label},
+            )
             return 0, "Set Sonarr target quality text"
 
         count = 0
-        for item in sonarr_client.get_items():
+        series_list = sonarr_client.get_items()
+        logger.info(
+            "Evaluating %d series (target quality: '%s')",
+            len(series_list), target_quality,
+            extra={"source_label": sonarr_client.label},
+        )
+        for item in series_list:
             series_id = item.get("id")
             if not isinstance(series_id, int):
                 continue
 
+            series_title = item.get("title", f"Series {series_id}")
+            series_year = item.get("year", "")
+            series_slug = item.get("titleSlug", "")
+            series_url = f"{sonarr_client.base_url}/series/{series_slug}" if series_slug else ""
             profile_id = item.get(sonarr_client.profile_key)
             episodes = sonarr_client.get_episodes(series_id)
             episode_files = sonarr_client.get_episode_files(series_id)
+            monitored_eps = sum(1 for ep in episodes if ep.get("monitored"))
+            logger.debug(
+                "Scanning '%s' (%s) — %d episodes (%d monitored), %d files",
+                series_title, series_year, len(episodes), monitored_eps, len(episode_files),
+                extra={"source_label": sonarr_client.label, "link_url": series_url},
+            )
             episode_file_by_id: dict[int, dict[str, object]] = {}
             for episode_file in episode_files:
                 file_id = episode_file.get("id")
@@ -224,29 +287,56 @@ class ArrPoller:
                 if not self._quality_text_matches(quality_name, target_quality):
                     continue
 
-                sonarr_client.unmonitor_episode(episode)
-                self._log_sonarr_episode_change(episode, series_id, profile_id if isinstance(profile_id, int) else None)
+                ep_title = episode.get("title", "")
+                season = episode.get("seasonNumber", "?")
+                ep_num = episode.get("episodeNumber", "?")
+                logger.info(
+                    "Unmonitoring '%s' S%02dE%02d '%s' — file quality '%s' matches target '%s'",
+                    series_title,
+                    season if isinstance(season, int) else 0,
+                    ep_num if isinstance(ep_num, int) else 0,
+                    ep_title, quality_name, target_quality,
+                    extra={"source_label": sonarr_client.label, "link_url": series_url},
+                )
+                sonarr_client.unmonitor_episode(episode, series_title=series_title, series_slug=series_slug)
+                self._log_sonarr_episode_change(
+                    episode, series_id,
+                    series_title=series_title,
+                    quality_name=quality_name,
+                    link_url=series_url,
+                )
                 count += 1
         return count, ""
 
     def _radarr_client(self, settings: AppSettings) -> RadarrClient:
         base_url = settings.radarr_url or self.default_radarr_url
         api_key = settings.radarr_api_key or self.default_radarr_api_key
-        return RadarrClient(base_url, api_key)
+        return RadarrClient(base_url, api_key, label="Radarr")
 
     def _sonarr_client(self, settings: AppSettings) -> SonarrClient:
         base_url = settings.sonarr_url or self.default_sonarr_url
         api_key = settings.sonarr_api_key or self.default_sonarr_api_key
-        return SonarrClient(base_url, api_key)
+        return SonarrClient(base_url, api_key, label="Sonarr")
 
     def _check_service(self, service: str, client: RadarrClient | SonarrClient) -> tuple[bool, str]:
         try:
-            profile_count = len(client.get_profiles())
-            message = f"Connected ({profile_count} profiles)"
+            profiles = client.get_profiles()
+            profile_names = ", ".join(p.name for p in profiles)
+            message = f"Connected ({len(profiles)} profiles: {profile_names})"
+            logger.info(
+                "Health check passed — %s",
+                message,
+                extra={"source_label": client.label},
+            )
             self.update_service_status(service, True, message)
             return True, message
         except ArrClientError as exc:
             message = str(exc)
+            logger.error(
+                "Health check FAILED — %s",
+                message,
+                extra={"source_label": client.label},
+            )
             self.update_service_status(service, False, message)
             return False, message
 
@@ -284,7 +374,10 @@ class ArrPoller:
         self,
         episode: dict[str, object],
         series_id: int,
-        profile_id: int | None,
+        *,
+        series_title: str = "",
+        quality_name: str = "",
+        link_url: str = "",
     ) -> None:
         season = episode.get("seasonNumber")
         episode_number = episode.get("episodeNumber")
@@ -296,12 +389,13 @@ class ArrPoller:
             label = f"{label} - {title.strip()}"
         self.change_log_store.append(
             {
-                "service": "sonarr",
-                "series_id": series_id,
+                "service": "Sonarr",
+                "series_title": series_title,
                 "item_id": episode.get("id"),
                 "title": label,
-                "profile_id": profile_id,
-                "action": "unmonitor_episode",
+                "quality": quality_name,
+                "action": "Unmonitored episode",
+                "link_url": link_url,
             }
         )
 
@@ -309,15 +403,20 @@ class ArrPoller:
         self,
         service: str,
         item: dict[str, object],
-        profile_id: int | None,
+        *,
+        quality_name: str = "",
+        link_url: str = "",
     ) -> None:
         title = item.get("title") or item.get("sortTitle") or "Unknown"
+        year = item.get("year", "")
+        display_title = f"{title} ({year})" if year else str(title)
         self.change_log_store.append(
             {
-                "service": service,
+                "service": service.capitalize(),
                 "item_id": item.get("id"),
-                "title": str(title),
-                "profile_id": profile_id,
-                "action": "unmonitor",
+                "title": display_title,
+                "quality": quality_name,
+                "action": "Unmonitored movie",
+                "link_url": link_url,
             }
         )

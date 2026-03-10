@@ -10,6 +10,7 @@ services:
       SONARR_URL: "http://sonarr:8989"
       SONARR_API_KEY: ""
       SETTINGS_PATH: "/config/settings.json"
+      LOG_PATH: "/config/app-log.jsonl"
       PORT: "5200"
     volumes:
       - ./config:/config

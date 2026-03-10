@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from datetime import datetime
@@ -9,11 +10,17 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from .arr_client import ArrClientError, RadarrClient, SonarrClient
 from .change_log import ChangeLogStore
 from .config import AppSettings, SettingsStore, env
+from .log_manager import setup_logging
 from .poller import ArrPoller
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
+    log_path = env("LOG_PATH", "/config/app-log.jsonl") or None
+    log_store = setup_logging(log_path)
 
     settings_store = SettingsStore(env("SETTINGS_PATH", "/config/settings.json"))
     change_log_store = ChangeLogStore(env("CHANGE_LOG_PATH", "/config/change-log.jsonl"))
@@ -31,6 +38,7 @@ def create_app() -> Flask:
         default_sonarr_api_key,
     )
     poller.start()
+    logger.info("Application started — poller running, UI on port %s", os.getenv("PORT", "5200"))
 
     def effective_settings(stored: AppSettings) -> AppSettings:
         return AppSettings(
@@ -94,16 +102,6 @@ def create_app() -> Flask:
                 )
             recent_runs.append({**run, "started_at_display": started_at_display})
 
-        recent_changes = []
-        for change in change_log_store.recent(200):
-            changed_at = change.get("timestamp")
-            changed_at_display = str(changed_at)
-            if isinstance(changed_at, (float, int)):
-                changed_at_display = datetime.fromtimestamp(changed_at).isoformat(
-                    sep=" ", timespec="seconds"
-                )
-            recent_changes.append({**change, "timestamp_display": changed_at_display})
-
         return render_template(
             "index.html",
             settings=settings,
@@ -116,7 +114,6 @@ def create_app() -> Flask:
             stats=poller.stats,
             last_run=last_run,
             recent_runs=recent_runs,
-            recent_changes=recent_changes,
         )
 
     @app.post("/settings/radarr")
@@ -265,6 +262,25 @@ def create_app() -> Flask:
     def clear_change_log():
         change_log_store.clear()
         return redirect(url_for("index", notice="Change log cleared"))
+
+    @app.route("/api/changes", methods=["GET"])
+    def api_changes():
+        limit = request.args.get("limit", 200, type=int)
+        return jsonify(change_log_store.recent(limit))
+
+    @app.route("/api/logs", methods=["GET"])
+    def api_logs():
+        limit = request.args.get("limit", 200, type=int)
+        level = request.args.get("level", "DEBUG")
+        source = request.args.get("source", "")
+        entries = log_store.recent(limit=limit, min_level=level, source=source)
+        return jsonify(entries)
+
+    @app.post("/clear-logs")
+    def clear_logs():
+        log_store.clear()
+        logger.info("Application logs cleared")
+        return redirect(url_for("index", _anchor="logs"))
 
     @app.route("/health", methods=["GET"])
     def health():

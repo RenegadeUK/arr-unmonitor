@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ChangeLogStore:
@@ -18,6 +21,7 @@ class ChangeLogStore:
         with self._lock:
             with self.path.open("a", encoding="utf-8") as file:
                 file.write(line + "\n")
+        logger.debug("Change log entry appended: %s", entry.get("title", ""))
 
     def recent(self, limit: int = 200) -> list[dict[str, object]]:
         if limit <= 0 or not self.path.exists():

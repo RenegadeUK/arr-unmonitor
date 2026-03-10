@@ -9,6 +9,20 @@
     <style>
       body { font-family: Arial, sans-serif; margin: 0; background: #1f2329; color: #e5e7eb; }
       .wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+      /* ── Tab navigation ── */
+      .tab-nav { display: flex; gap: 0.35rem; margin-bottom: 1.2rem; border-bottom: 2px solid #3a404a; padding-bottom: 0; }
+      .tab-btn {
+        padding: 0.5rem 1.1rem; cursor: pointer; border: 1px solid #3a404a; border-bottom: none;
+        border-radius: 8px 8px 0 0; background: #2b313a; color: #9ca3af; font-weight: 600; font-size: 0.95rem;
+        transition: background 0.15s, color 0.15s;
+      }
+      .tab-btn:hover { background: #374151; color: #e5e7eb; }
+      .tab-btn.active { background: #1f2329; color: #e5e7eb; border-color: #3a404a; border-bottom: 2px solid #1f2329; margin-bottom: -2px; }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
+
+      /* ── Existing styles ── */
       .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
       .tile { background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; padding: 1rem; }
       .tile h2 { margin: 0 0 1rem 0; font-size: 1.1rem; }
@@ -35,226 +49,313 @@
       th, td { border: 1px solid #3a404a; padding: 0.45rem; text-align: left; }
       th { background: #262b33; }
       a { color: #93c5fd; }
+
+      /* ── Log level badges ── */
+      .log-level { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.78rem; font-weight: bold; font-family: monospace; min-width: 58px; text-align: center; }
+      .log-DEBUG    { background: #3f3f46; color: #d4d4d8; }
+      .log-INFO     { background: #1e3a5f; color: #93c5fd; }
+      .log-WARNING  { background: #713f12; color: #fde68a; }
+      .log-ERROR    { background: #7f1d1d; color: #fecaca; }
+      .log-CRITICAL { background: #7f1d1d; color: #fecaca; font-weight: 900; }
+
+      /* ── Logs toolbar ── */
+      .log-toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+      .log-toolbar label { display: inline; margin: 0; font-weight: normal; font-size: 0.9rem; }
+      .log-toolbar select { width: auto; padding: 0.35rem 0.5rem; font-size: 0.9rem; }
+      .log-count { color: #9ca3af; font-size: 0.85rem; margin-left: auto; }
+
+      /* ── Log table tweaks ── */
+      #log-table td.log-msg { font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85rem; word-break: break-word; }
+      .log-link { margin-left: 0.4rem; font-size: 0.8rem; text-decoration: none; opacity: 0.7; }
+      .log-link:hover { opacity: 1; }
+      #log-table td.log-ts  { white-space: nowrap; font-size: 0.85rem; }
+      #log-table td.log-src { font-size: 0.83rem; white-space: nowrap; }
+
+      /* ── Source badges ── */
+      .src-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.78rem; font-weight: 600; }
+      .src-Radarr   { background: #1e3a5f; color: #93c5fd; }
+      .src-Sonarr   { background: #14532d; color: #bbf7d0; }
+      .src-Poller   { background: #3f3f46; color: #d4d4d8; }
+      .src-App      { background: #713f12; color: #fde68a; }
+      .src-Config   { background: #4a1d6e; color: #d8b4fe; }
+      .src-default  { background: #3f3f46; color: #d4d4d8; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>ARR Unmonitor</h1>
 
-      <div class="status">
-        <div class="status-grid">
-          <div class="status-chip">
-            <div class="chip-label">Health</div>
-            <div class="chip-value"><span id="health-badge" class="badge badge-unknown">Unknown</span></div>
+      <!-- ═══ Tab navigation ═══ -->
+      <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="logs">Logs</button>
+      </nav>
+
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- ═══ Dashboard tab ═══ -->
+      <!-- ═══════════════════════════════════════════ -->
+      <div id="tab-dashboard" class="tab-panel active">
+
+        <div class="status">
+          <div class="status-grid">
+            <div class="status-chip">
+              <div class="chip-label">Health</div>
+              <div class="chip-value"><span id="health-badge" class="badge badge-unknown">Unknown</span></div>
+            </div>
+            <div class="status-chip">
+              <div class="chip-label">Runner</div>
+              <div id="runner-state" class="chip-value">Idle</div>
+            </div>
+            <div class="status-chip">
+              <div class="chip-label">Next run in</div>
+              <div id="next-run-countdown" class="chip-value">--:--</div>
+            </div>
+            <div class="status-chip">
+              <div class="chip-label">Unmonitored today</div>
+              <div id="unmonitored-today" class="chip-value">0</div>
+            </div>
           </div>
-          <div class="status-chip">
-            <div class="chip-label">Runner</div>
-            <div id="runner-state" class="chip-value">Idle</div>
+          <p><strong>Last poll:</strong> <span id="last-poll-value">{{ last_run }}</span></p>
+          <p><strong>Last unmonitored:</strong> <span id="last-unmonitored-value">Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</span></p>
+          <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
+          {% if stats.last_error %}
+          <p class="error"><strong>Last error:</strong> {{ stats.last_error }}</p>
+          {% endif %}
+          {% if profile_error %}
+          <p class="error"><strong>Profile load error:</strong> {{ profile_error }}</p>
+          {% endif %}
+          {% if notice %}
+          <p class="notice"><strong>Notice:</strong> {{ notice }}</p>
+          {% endif %}
+          {% if error %}
+          <p class="error"><strong>Error:</strong> {{ error }}</p>
+          {% endif %}
+        </div>
+
+        <div class="tiles">
+          <div class="tile">
+            <h2>
+              Radarr
+              <span id="radarr-badge" class="badge badge-unknown">Unknown</span>
+            </h2>
+            <form method="post" action="/settings/radarr">
+              <div class="row">
+                <label for="radarr_url">Radarr URL</label>
+                <input id="radarr_url" type="text" name="radarr_url" value="{{ settings.radarr_url }}" />
+              </div>
+              <div class="row">
+                <label for="radarr_api_key">Radarr API key</label>
+                <input id="radarr_api_key" type="password" name="radarr_api_key" value="{{ settings.radarr_api_key }}" />
+              </div>
+              <div class="row">
+                <label for="radarr_target_quality">Stop at quality text (example: Remux-2160p)</label>
+                <input id="radarr_target_quality" type="text" name="radarr_target_quality" value="{{ settings.radarr_target_quality }}" />
+              </div>
+              <div class="row">
+                <label for="radarr_profile_name">Optional profile filter name (blank = all profiles)</label>
+                <input id="radarr_profile_name" type="text" name="radarr_profile_name" value="{{ settings.radarr_profile_name }}" list="radarr-profile-options" />
+                <datalist id="radarr-profile-options">
+                  {% for profile in radarr_profiles %}
+                  <option value="{{ profile.name }}"></option>
+                  {% endfor %}
+                </datalist>
+              </div>
+              <div class="actions">
+                <button type="submit">Save Radarr</button>
+                <button type="submit" formaction="/test/radarr" formmethod="post">Test Radarr</button>
+              </div>
+            </form>
           </div>
-          <div class="status-chip">
-            <div class="chip-label">Next run in</div>
-            <div id="next-run-countdown" class="chip-value">--:--</div>
+
+          <div class="tile">
+            <h2>
+              Sonarr
+              <span id="sonarr-badge" class="badge badge-unknown">Unknown</span>
+            </h2>
+            <form method="post" action="/settings/sonarr">
+              <div class="row">
+                <label for="sonarr_url">Sonarr URL</label>
+                <input id="sonarr_url" type="text" name="sonarr_url" value="{{ settings.sonarr_url }}" />
+              </div>
+              <div class="row">
+                <label for="sonarr_api_key">Sonarr API key</label>
+                <input id="sonarr_api_key" type="password" name="sonarr_api_key" value="{{ settings.sonarr_api_key }}" />
+              </div>
+              <div class="row">
+                <label for="sonarr_target_quality">Stop episode at quality text (example: Remux-2160p)</label>
+                <input id="sonarr_target_quality" type="text" name="sonarr_target_quality" value="{{ settings.sonarr_target_quality }}" />
+              </div>
+              <div class="row">
+                <label for="sonarr_profile_name">Optional profile filter name (blank = all profiles)</label>
+                <input id="sonarr_profile_name" type="text" name="sonarr_profile_name" value="{{ settings.sonarr_profile_name }}" list="sonarr-profile-options" />
+                <datalist id="sonarr-profile-options">
+                  {% for profile in sonarr_profiles %}
+                  <option value="{{ profile.name }}"></option>
+                  {% endfor %}
+                </datalist>
+              </div>
+              <div class="actions">
+                <button type="submit">Save Sonarr</button>
+                <button type="submit" formaction="/test/sonarr" formmethod="post">Test Sonarr</button>
+              </div>
+            </form>
           </div>
-          <div class="status-chip">
-            <div class="chip-label">Unmonitored today</div>
-            <div id="unmonitored-today" class="chip-value">0</div>
+
+          <div class="tile">
+            <h2>Worker</h2>
+            <form method="post" action="/settings">
+              <div class="row">
+                <label for="poll_interval_seconds">Poll interval (seconds)</label>
+                <input id="poll_interval_seconds" type="number" min="30" step="1" name="poll_interval_seconds" value="{{ settings.poll_interval_seconds }}" />
+              </div>
+              <div class="row">
+                <label>
+                  <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} />
+                  Polling enabled
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit">Save Worker</button>
+                <button type="submit" formaction="/run-now" formmethod="post">Run now</button>
+                <button type="submit" formaction="/clear-history" formmethod="post">Clear history</button>
+                <button type="submit" formaction="/clear-change-log" formmethod="post">Clear change log</button>
+              </div>
+            </form>
           </div>
         </div>
-        <p><strong>Last poll:</strong> <span id="last-poll-value">{{ last_run }}</span></p>
-        <p><strong>Last unmonitored:</strong> <span id="last-unmonitored-value">Radarr {{ stats.last_unmonitored['radarr'] }}, Sonarr {{ stats.last_unmonitored['sonarr'] }}</span></p>
-        <p><strong>Status API:</strong> <a href="/status" target="_blank" rel="noopener">/status</a></p>
-        {% if stats.last_error %}
-        <p class="error"><strong>Last error:</strong> {{ stats.last_error }}</p>
-        {% endif %}
-        {% if profile_error %}
-        <p class="error"><strong>Profile load error:</strong> {{ profile_error }}</p>
-        {% endif %}
-        {% if notice %}
-        <p class="notice"><strong>Notice:</strong> {{ notice }}</p>
-        {% endif %}
-        {% if error %}
-        <p class="error"><strong>Error:</strong> {{ error }}</p>
-        {% endif %}
-      </div>
 
-      <div class="tiles">
-        <div class="tile">
-          <h2>
-            Radarr
-            <span id="radarr-badge" class="badge badge-unknown">Unknown</span>
-          </h2>
-          <form method="post" action="/settings/radarr">
-            <div class="row">
-              <label for="radarr_url">Radarr URL</label>
-              <input id="radarr_url" type="text" name="radarr_url" value="{{ settings.radarr_url }}" />
-            </div>
-            <div class="row">
-              <label for="radarr_api_key">Radarr API key</label>
-              <input id="radarr_api_key" type="password" name="radarr_api_key" value="{{ settings.radarr_api_key }}" />
-            </div>
-            <div class="row">
-              <label for="radarr_target_quality">Stop at quality text (example: Remux-2160p)</label>
-              <input id="radarr_target_quality" type="text" name="radarr_target_quality" value="{{ settings.radarr_target_quality }}" />
-            </div>
-            <div class="row">
-              <label for="radarr_profile_name">Optional profile filter name (blank = all profiles)</label>
-              <input id="radarr_profile_name" type="text" name="radarr_profile_name" value="{{ settings.radarr_profile_name }}" list="radarr-profile-options" />
-              <datalist id="radarr-profile-options">
-                {% for profile in radarr_profiles %}
-                <option value="{{ profile.name }}"></option>
-                {% endfor %}
-              </datalist>
-            </div>
-            <div class="actions">
-              <button type="submit">Save Radarr</button>
-              <button type="submit" formaction="/test/radarr" formmethod="post">Test Radarr</button>
-            </div>
+        <h2>Recent runs</h2>
+        {% if recent_runs %}
+        <table>
+          <thead>
+            <tr>
+              <th>Started</th>
+              <th>Duration (s)</th>
+              <th>Radarr</th>
+              <th>Sonarr</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in recent_runs %}
+            <tr>
+              <td>{{ run.started_at_display }}</td>
+              <td>{{ run.duration_seconds }}</td>
+              <td>{{ run.radarr_unmonitored }}</td>
+              <td>{{ run.sonarr_unmonitored }}</td>
+              <td>{% if run.error %}<span class="error">{{ run.error }}</span>{% else %}None{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>No runs yet.</p>
+        {% endif %}
+
+        <h2>Change log</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Service</th>
+              <th>Title</th>
+              <th>Quality</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="change-log-body">
+            <tr><td colspan="5" style="color:#9ca3af;">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+
+      </div><!-- /tab-dashboard -->
+
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- ═══ Logs tab ═══ -->
+      <!-- ═══════════════════════════════════════════ -->
+      <div id="tab-logs" class="tab-panel">
+
+        <div class="log-toolbar">
+          <label for="log-level-filter">Level:</label>
+          <select id="log-level-filter">
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO" selected>INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+
+          <label for="log-source-filter">Source:</label>
+          <select id="log-source-filter">
+            <option value="" selected>All</option>
+            <option value="Radarr">Radarr</option>
+            <option value="Sonarr">Sonarr</option>
+            <option value="Poller">Poller</option>
+            <option value="App">App</option>
+            <option value="Config">Config</option>
+          </select>
+
+          <label for="log-limit">Show:</label>
+          <select id="log-limit">
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+
+          <form method="post" action="/clear-logs" style="margin:0;">
+            <button type="submit">Clear logs</button>
           </form>
+
+          <span class="log-count" id="log-count-label">0 entries</span>
         </div>
 
-        <div class="tile">
-          <h2>
-            Sonarr
-            <span id="sonarr-badge" class="badge badge-unknown">Unknown</span>
-          </h2>
-          <form method="post" action="/settings/sonarr">
-            <div class="row">
-              <label for="sonarr_url">Sonarr URL</label>
-              <input id="sonarr_url" type="text" name="sonarr_url" value="{{ settings.sonarr_url }}" />
-            </div>
-            <div class="row">
-              <label for="sonarr_api_key">Sonarr API key</label>
-              <input id="sonarr_api_key" type="password" name="sonarr_api_key" value="{{ settings.sonarr_api_key }}" />
-            </div>
-            <div class="row">
-              <label for="sonarr_target_quality">Stop episode at quality text (example: Remux-2160p)</label>
-              <input id="sonarr_target_quality" type="text" name="sonarr_target_quality" value="{{ settings.sonarr_target_quality }}" />
-            </div>
-            <div class="row">
-              <label for="sonarr_profile_name">Optional profile filter name (blank = all profiles)</label>
-              <input id="sonarr_profile_name" type="text" name="sonarr_profile_name" value="{{ settings.sonarr_profile_name }}" list="sonarr-profile-options" />
-              <datalist id="sonarr-profile-options">
-                {% for profile in sonarr_profiles %}
-                <option value="{{ profile.name }}"></option>
-                {% endfor %}
-              </datalist>
-            </div>
-            <div class="actions">
-              <button type="submit">Save Sonarr</button>
-              <button type="submit" formaction="/test/sonarr" formmethod="post">Test Sonarr</button>
-            </div>
-          </form>
-        </div>
+        <table id="log-table">
+          <thead>
+            <tr>
+              <th style="width:155px;">Timestamp</th>
+              <th style="width:75px;">Level</th>
+              <th style="width:90px;">Source</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="log-table-body">
+            <tr><td colspan="4" style="color:#9ca3af;">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
 
-        <div class="tile">
-          <h2>Worker</h2>
-          <form method="post" action="/settings">
-            <div class="row">
-              <label for="poll_interval_seconds">Poll interval (seconds)</label>
-              <input id="poll_interval_seconds" type="number" min="30" step="1" name="poll_interval_seconds" value="{{ settings.poll_interval_seconds }}" />
-            </div>
-            <div class="row">
-              <label>
-                <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %} />
-                Polling enabled
-              </label>
-            </div>
-            <div class="actions">
-              <button type="submit">Save Worker</button>
-              <button type="submit" formaction="/run-now" formmethod="post">Run now</button>
-              <button type="submit" formaction="/clear-history" formmethod="post">Clear history</button>
-              <button type="submit" formaction="/clear-change-log" formmethod="post">Clear change log</button>
-            </div>
-          </form>
-        </div>
-      </div>
+      </div><!-- /tab-logs -->
 
-      <h2>Recent runs</h2>
-      {% if recent_runs %}
-      <table>
-        <thead>
-          <tr>
-            <th>Started</th>
-            <th>Duration (s)</th>
-            <th>Radarr</th>
-            <th>Sonarr</th>
-            <th>Error</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for run in recent_runs %}
-          <tr>
-            <td>{{ run.started_at_display }}</td>
-            <td>{{ run.duration_seconds }}</td>
-            <td>{{ run.radarr_unmonitored }}</td>
-            <td>{{ run.sonarr_unmonitored }}</td>
-            <td>{% if run.error %}<span class="error">{{ run.error }}</span>{% else %}None{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p>No runs yet.</p>
-      {% endif %}
-
-      <h2>Change log</h2>
-      {% if recent_changes %}
-      <table>
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Service</th>
-            <th>Title</th>
-            <th>Profile</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for change in recent_changes %}
-          <tr>
-            <td>{{ change.timestamp_display }}</td>
-            <td>{{ change.service }}</td>
-            <td>{{ change.title }}</td>
-            <td>{{ change.profile_id }}</td>
-            <td>{{ change.action }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p>No item changes logged yet.</p>
-      {% endif %}
-    </div>
+    </div><!-- /wrap -->
 
     <script>
-      function applyBadge(elementId, state) {
-        const el = document.getElementById(elementId);
-        if (!el) {
-          return;
-        }
-        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        if (!state || state.ok === null || typeof state.ok === 'undefined') {
-          el.classList.add('badge-unknown');
-          el.textContent = 'Unknown';
-          return;
-        }
-        if (state.ok) {
-          el.classList.add('badge-ok');
-          el.textContent = 'Connected';
-          return;
-        }
-        el.classList.add('badge-bad');
-        el.textContent = 'Disconnected';
+      /* ═══ Tab switching ═══ */
+      const tabBtns = document.querySelectorAll('.tab-btn');
+      const tabPanels = document.querySelectorAll('.tab-panel');
+      let activeTab = 'dashboard';
+
+      function switchTab(tabId) {
+        activeTab = tabId;
+        tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
+        tabPanels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabId));
+        window.location.hash = tabId;
+        if (tabId === 'logs') { refreshLogs(); }
       }
 
+      tabBtns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+      // Restore tab from URL hash
+      const initHash = window.location.hash.replace('#', '');
+      if (initHash && document.getElementById('tab-' + initHash)) {
+        switchTab(initHash);
+      }
+
+      /* ═══ Shared helpers ═══ */
       function pad2(value) {
         return String(value).padStart(2, '0');
       }
 
       function formatCountdown(seconds) {
-        if (seconds === null || typeof seconds === 'undefined') {
-          return '--:--';
-        }
+        if (seconds === null || typeof seconds === 'undefined') { return '--:--'; }
         const safe = Math.max(0, Number(seconds) || 0);
         const minutes = Math.floor(safe / 60);
         const remSeconds = Math.floor(safe % 60);
@@ -262,110 +363,67 @@
       }
 
       function formatTimestamp(value) {
-        if (value === null || typeof value === 'undefined') {
-          return 'Never';
-        }
+        if (value === null || typeof value === 'undefined') { return 'Never'; }
         const date = new Date(Number(value) * 1000);
-        if (Number.isNaN(date.getTime())) {
-          return 'Never';
+        if (Number.isNaN(date.getTime())) { return 'Never'; }
+        return `${date.getFullYear()}-${pad2(date.getMonth()+1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+      }
+
+      /* ═══ Dashboard: badges & status ═══ */
+      function applyBadge(elementId, state) {
+        const el = document.getElementById(elementId);
+        if (!el) { return; }
+        el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
+        if (!state || state.ok === null || typeof state.ok === 'undefined') {
+          el.classList.add('badge-unknown'); el.textContent = 'Unknown'; return;
         }
-        const year = date.getFullYear();
-        const month = pad2(date.getMonth() + 1);
-        const day = pad2(date.getDate());
-        const hours = pad2(date.getHours());
-        const minutes = pad2(date.getMinutes());
-        const seconds = pad2(date.getSeconds());
-        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        if (state.ok) { el.classList.add('badge-ok'); el.textContent = 'Connected'; return; }
+        el.classList.add('badge-bad'); el.textContent = 'Disconnected';
       }
 
       function applyHealthBadge(state) {
         const el = document.getElementById('health-badge');
-        if (!el) {
-          return;
-        }
+        if (!el) { return; }
         el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        if (state === 'healthy') {
-          el.classList.add('badge-ok');
-          el.textContent = 'Healthy';
-          return;
-        }
-        if (state === 'running') {
-          el.classList.add('badge-unknown');
-          el.textContent = 'Running';
-          return;
-        }
-        if (state === 'paused') {
-          el.classList.add('badge-unknown');
-          el.textContent = 'Paused';
-          return;
-        }
-        if (state === 'error') {
-          el.classList.add('badge-bad');
-          el.textContent = 'Error';
-          return;
-        }
-        el.classList.add('badge-unknown');
-        el.textContent = 'Unknown';
+        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], error: ['badge-bad','Error'] };
+        const entry = map[state] || ['badge-unknown', 'Unknown'];
+        el.classList.add(entry[0]); el.textContent = entry[1];
       }
 
-      let runtimeState = {
-        seconds_until_next_run: null,
-      };
+      let runtimeState = { seconds_until_next_run: null };
 
       function renderRuntime(runtime) {
-        runtimeState.seconds_until_next_run = runtime && typeof runtime.seconds_until_next_run !== 'undefined'
-          ? runtime.seconds_until_next_run
-          : null;
-
+        runtimeState.seconds_until_next_run = runtime && typeof runtime.seconds_until_next_run !== 'undefined' ? runtime.seconds_until_next_run : null;
         const runner = document.getElementById('runner-state');
-        if (runner) {
-          runner.textContent = runtime && runtime.is_running ? 'Running now...' : 'Idle';
-        }
-
+        if (runner) { runner.textContent = runtime && runtime.is_running ? 'Running now...' : 'Idle'; }
         const today = document.getElementById('unmonitored-today');
-        if (today) {
-          today.textContent = String(runtime && typeof runtime.unmonitored_today !== 'undefined' ? runtime.unmonitored_today : 0);
-        }
-
+        if (today) { today.textContent = String(runtime && typeof runtime.unmonitored_today !== 'undefined' ? runtime.unmonitored_today : 0); }
         applyHealthBadge(runtime ? runtime.health_state : undefined);
         const countdown = document.getElementById('next-run-countdown');
-        if (countdown) {
-          countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
-        }
+        if (countdown) { countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run); }
       }
 
       function renderLastRunInfo(data) {
         const lastPoll = document.getElementById('last-poll-value');
-        if (lastPoll) {
-          lastPoll.textContent = formatTimestamp(data.last_run);
-        }
-
+        if (lastPoll) { lastPoll.textContent = formatTimestamp(data.last_run); }
         const lastUnmonitored = document.getElementById('last-unmonitored-value');
         if (lastUnmonitored) {
           const counts = data.last_unmonitored || {};
-          const radarr = typeof counts.radarr === 'number' ? counts.radarr : 0;
-          const sonarr = typeof counts.sonarr === 'number' ? counts.sonarr : 0;
-          lastUnmonitored.textContent = `Radarr ${radarr}, Sonarr ${sonarr}`;
+          lastUnmonitored.textContent = `Radarr ${typeof counts.radarr === 'number' ? counts.radarr : 0}, Sonarr ${typeof counts.sonarr === 'number' ? counts.sonarr : 0}`;
         }
       }
 
       function tickCountdown() {
-        if (runtimeState.seconds_until_next_run === null || typeof runtimeState.seconds_until_next_run === 'undefined') {
-          return;
-        }
+        if (runtimeState.seconds_until_next_run === null || typeof runtimeState.seconds_until_next_run === 'undefined') { return; }
         runtimeState.seconds_until_next_run = Math.max(0, runtimeState.seconds_until_next_run - 1);
         const countdown = document.getElementById('next-run-countdown');
-        if (countdown) {
-          countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
-        }
+        if (countdown) { countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run); }
       }
 
       async function refreshBadges() {
         try {
           const response = await fetch('/status', { cache: 'no-store' });
-          if (!response.ok) {
-            return;
-          }
+          if (!response.ok) { return; }
           const data = await response.json();
           const serviceStatus = data.service_status || {};
           applyBadge('radarr-badge', serviceStatus.radarr);
@@ -379,9 +437,117 @@
         }
       }
 
+      /* ═══ Logs tab: auto-refresh ═══ */
+      function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      function sourceBadgeClass(src) {
+        const known = ['Radarr','Sonarr','Poller','App','Config'];
+        return known.includes(src) ? `src-${src}` : 'src-default';
+      }
+
+      /* ═══ Change log: auto-refresh ═══ */
+      async function refreshChanges() {
+        try {
+          const resp = await fetch('/api/changes?limit=200', { cache: 'no-store' });
+          if (!resp.ok) { return; }
+          const entries = await resp.json();
+          const tbody = document.getElementById('change-log-body');
+          if (!tbody) { return; }
+
+          if (entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="color:#9ca3af;">No item changes logged yet.</td></tr>';
+            return;
+          }
+
+          let html = '';
+          for (const c of entries) {
+            const ts = formatTimestamp(c.timestamp);
+            const svc = c.service || '';
+            const seriesTitle = c.series_title || '';
+            const title = c.title || '';
+            const linkUrl = c.link_url || '';
+            const quality = c.quality || '\u2014';
+            const action = c.action || '';
+
+            let titleHtml = '';
+            if (seriesTitle) {
+              titleHtml += `<span style="color:#9ca3af;">${escapeHtml(seriesTitle)}</span> \u2014 `;
+            }
+            titleHtml += linkUrl
+              ? `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>`
+              : escapeHtml(title);
+
+            html += `<tr>
+              <td>${escapeHtml(ts)}</td>
+              <td><span class="src-badge ${sourceBadgeClass(svc)}">${escapeHtml(svc)}</span></td>
+              <td>${titleHtml}</td>
+              <td>${escapeHtml(quality)}</td>
+              <td>${escapeHtml(action)}</td>
+            </tr>`;
+          }
+          tbody.innerHTML = html;
+        } catch (_err) {
+          /* silent */
+        }
+      }
+
+      async function refreshLogs() {
+        const level = document.getElementById('log-level-filter').value;
+        const limit = document.getElementById('log-limit').value;
+        const source = document.getElementById('log-source-filter').value;
+        let url = `/api/logs?level=${level}&limit=${limit}`;
+        if (source) { url += `&source=${encodeURIComponent(source)}`; }
+        try {
+          const resp = await fetch(url, { cache: 'no-store' });
+          if (!resp.ok) { return; }
+          const entries = await resp.json();
+          const tbody = document.getElementById('log-table-body');
+          const countLabel = document.getElementById('log-count-label');
+          if (countLabel) { countLabel.textContent = `${entries.length} entries`; }
+
+          if (entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:#9ca3af;">No log entries.</td></tr>';
+            return;
+          }
+
+          let html = '';
+          for (const entry of entries) {
+            const ts = formatTimestamp(entry.timestamp);
+            const lvl = entry.level || 'INFO';
+            const src = entry.source || '';
+            const msg = entry.message || '';
+            const linkUrl = entry.link_url || '';
+            const linkHtml = linkUrl
+              ? ` <a class="log-link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener" title="Open in ${escapeHtml(src)}">&#x1F517;</a>`
+              : '';
+            html += `<tr>
+              <td class="log-ts">${escapeHtml(ts)}</td>
+              <td><span class="log-level log-${escapeHtml(lvl)}">${escapeHtml(lvl)}</span></td>
+              <td class="log-src"><span class="src-badge ${sourceBadgeClass(src)}">${escapeHtml(src)}</span></td>
+              <td class="log-msg">${escapeHtml(msg)}${linkHtml}</td>
+            </tr>`;
+          }
+          tbody.innerHTML = html;
+        } catch (_err) {
+          /* silent */
+        }
+      }
+
+      document.getElementById('log-level-filter').addEventListener('change', refreshLogs);
+      document.getElementById('log-limit').addEventListener('change', refreshLogs);
+      document.getElementById('log-source-filter').addEventListener('change', refreshLogs);
+
+      /* ═══ Init timers ═══ */
       refreshBadges();
+      refreshChanges();
       setInterval(refreshBadges, 5000);
       setInterval(tickCountdown, 1000);
+      setInterval(function() { if (activeTab === 'dashboard') { refreshChanges(); } }, 5000);
+      setInterval(function() { if (activeTab === 'logs') { refreshLogs(); } }, 3000);
     </script>
   </body>
 </html>
