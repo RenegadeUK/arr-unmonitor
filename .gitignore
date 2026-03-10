@@ -3,3 +3,7 @@ __pycache__/
 config/
 .env
 .venv/
+
+# Azurite (Azure Storage emulator)
+AzuriteConfig/
+__azurite_db_*
