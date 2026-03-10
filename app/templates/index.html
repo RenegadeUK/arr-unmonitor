@@ -98,6 +98,8 @@
       .server-card { background: #262b33; border: 1px solid #3a404a; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
       .server-card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
       .server-card-header h3 { margin: 0; font-size: 1rem; }
+      .toggle-enabled { cursor: pointer; width: 16px; height: 16px; accent-color: #16a34a; margin-left: auto; }
+      .toggle-label { font-size: 0.8rem; color: #9ca3af; cursor: pointer; user-select: none; }
       .server-card-details { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.2rem; font-size: 0.9rem; }
       .server-card-details .detail-label { color: #9ca3af; font-size: 0.82rem; }
       .server-card-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
@@ -576,7 +578,7 @@
               <span class="type-badge type-${escapeHtml(s.type)}">${escapeHtml(s.type)}</span>
               <h3>${escapeHtml(s.name)}</h3>
               <span class="badge ${bc}">${bt}</span>
-              ${!s.enabled ? '<span style="color:#6b7280;font-size:0.85rem;">(disabled)</span>' : ''}
+              <label class="toggle-label" style="margin-left:auto;"><input type="checkbox" class="toggle-enabled" ${s.enabled ? 'checked' : ''} onchange="toggleServerEnabled('${escapeHtml(s.name)}', this.checked)" /> Enabled</label>
             </div>
             <div class="server-card-details">
               <div><div class="detail-label">URL</div><div>${escapeHtml(s.url || 'Not set')}</div></div>
@@ -595,6 +597,18 @@
         }
         ct.innerHTML = html;
         updateLogSourceFilter(servers);
+      }
+
+      /* ═══ Settings: toggle enabled ═══ */
+      async function toggleServerEnabled(name, enabled) {
+        try {
+          await apiFetch(`/api/servers/${encodeURIComponent(name)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+          });
+          showToast(`${name} ${enabled ? 'enabled' : 'disabled'}`, true);
+          await refreshServerList();
+        } catch (err) { showToast(err.message, false); await refreshServerList(); }
       }
 
       /* ═══ Settings: add / edit form ═══ */
