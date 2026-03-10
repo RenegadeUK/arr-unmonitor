@@ -180,9 +180,11 @@
 
         <!-- Worker controls -->
         <div class="tile" style="margin-bottom:1.2rem;">
-          <h2>Worker</h2>
+          <h2>Worker <span id="worker-status-badge" class="badge badge-unknown" style="font-size:0.8rem;">--</span></h2>
           <div class="actions">
             <form method="post" action="/run-now" style="margin:0;"><button type="submit">Run now</button></form>
+            <form method="post" action="/stop-worker" style="margin:0;" id="stop-worker-form"><button type="submit" class="btn-danger">Stop worker</button></form>
+            <form method="post" action="/start-worker" style="margin:0;" id="start-worker-form"><button type="submit" class="btn-success">Start worker</button></form>
             <form method="post" action="/clear-history" style="margin:0;"><button type="submit">Clear history</button></form>
             <form method="post" action="/clear-change-log" style="margin:0;"><button type="submit">Clear change log</button></form>
           </div>
@@ -459,7 +461,7 @@
         const el = document.getElementById('health-badge');
         if (!el) return;
         el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], error: ['badge-bad','Error'] };
+        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], stopped: ['badge-bad','Stopped'], error: ['badge-bad','Error'] };
         const e = map[state] || ['badge-unknown', 'Unknown'];
         el.classList.add(e[0]); el.textContent = e[1];
       }
@@ -469,12 +471,31 @@
       function renderRuntime(runtime) {
         runtimeState.seconds_until_next_run = runtime?.seconds_until_next_run ?? null;
         const runner = document.getElementById('runner-state');
-        if (runner) runner.textContent = runtime?.is_running ? 'Running now...' : 'Idle';
+        if (runner) {
+          if (runtime?.worker_stopped) runner.textContent = 'Stopped';
+          else if (runtime?.is_running) runner.textContent = 'Running now...';
+          else runner.textContent = 'Idle';
+        }
         const today = document.getElementById('unmonitored-today');
         if (today) today.textContent = String(runtime?.unmonitored_today ?? 0);
         applyHealthBadge(runtime?.health_state);
         const countdown = document.getElementById('next-run-countdown');
-        if (countdown) countdown.textContent = formatCountdown(runtimeState.seconds_until_next_run);
+        if (countdown) countdown.textContent = runtime?.worker_stopped ? 'Stopped' : formatCountdown(runtimeState.seconds_until_next_run);
+
+        // Toggle stop/start button visibility
+        const stopForm = document.getElementById('stop-worker-form');
+        const startForm = document.getElementById('start-worker-form');
+        const workerBadge = document.getElementById('worker-status-badge');
+        if (stopForm && startForm) {
+          const stopped = !!runtime?.worker_stopped;
+          stopForm.style.display = stopped ? 'none' : '';
+          startForm.style.display = stopped ? '' : 'none';
+        }
+        if (workerBadge) {
+          workerBadge.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
+          if (runtime?.worker_stopped) { workerBadge.classList.add('badge-bad'); workerBadge.textContent = 'Stopped'; }
+          else { workerBadge.classList.add('badge-ok'); workerBadge.textContent = 'Running'; }
+        }
       }
 
       function renderLastRunInfo(data) {

@@ -251,6 +251,18 @@ def create_app() -> Flask:
         threading.Thread(target=poller.run_once, daemon=True).start()
         return redirect(url_for("index", notice="Manual run started"))
 
+    @app.post("/stop-worker")
+    def stop_worker():
+        poller.stop()
+        logger.info("Worker stopped via UI")
+        return redirect(url_for("index", notice="Worker stopped"))
+
+    @app.post("/start-worker")
+    def start_worker():
+        poller.start()
+        logger.info("Worker started via UI")
+        return redirect(url_for("index", notice="Worker started"))
+
     @app.post("/clear-history")
     def clear_history():
         poller.clear_history()
@@ -304,7 +316,9 @@ def create_app() -> Flask:
             seconds_until_next_run = max(int(next_run_at - now), 0)
 
         health_state = "healthy"
-        if poller.stats.last_error:
+        if poller.is_stopped():
+            health_state = "stopped"
+        elif poller.stats.last_error:
             health_state = "error"
         elif poller.is_running():
             health_state = "running"
@@ -337,6 +351,7 @@ def create_app() -> Flask:
         }
         payload["runtime"] = {
             "is_running": poller.is_running(),
+            "worker_stopped": poller.is_stopped(),
             "next_run_at": next_run_at,
             "seconds_until_next_run": seconds_until_next_run,
             "health_state": health_state,

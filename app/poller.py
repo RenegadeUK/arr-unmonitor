@@ -156,6 +156,9 @@ class ArrPoller:
     def is_running(self) -> bool:
         return self._run_lock.locked()
 
+    def is_stopped(self) -> bool:
+        return self._stop.is_set()
+
     def update_service_status(self, service: str, ok: bool, message: str) -> None:
         self.stats.service_status[service] = {
             "ok": ok,
