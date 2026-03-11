@@ -323,6 +323,7 @@ class ServerRunner:
                     extra={"source_label": sonarr_client.label, "link_url": series_url},
                 )
                 sonarr_client.unmonitor_episode(episode, series_title=series_title, series_slug=series_slug)
+                episode["monitored"] = False
                 _log_sonarr_episode_change(
                     self.change_log_store,
                     episode, series_id,
