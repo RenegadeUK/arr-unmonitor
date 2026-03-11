@@ -54,6 +54,7 @@ class ServerRunner:
         self.last_unmonitored_count: int = 0
         self.recent_runs: deque[dict[str, object]] = deque(maxlen=25)
         self.service_status: dict[str, object] = {}
+        self.current_action: str = ""
 
         self._run_lock = threading.Lock()
         self._stop = threading.Event()
@@ -105,11 +106,12 @@ class ServerRunner:
 
     # ── Single poll cycle ──
 
-    def run_once(self) -> None:
+    def run_once(self, *, force: bool = False) -> None:
         if not self._run_lock.acquire(blocking=False):
             logger.debug("Poll skipped for '%s' — already running", self.server_name)
             return
 
+        self.current_action = "polling"
         started_at = time.time()
         count = 0
         items_checked = 0
@@ -123,7 +125,7 @@ class ServerRunner:
                 error = f"Server '{self.server_name}' not found in settings"
                 logger.warning(error)
                 return
-            if not server.enabled:
+            if not force and not server.enabled:
                 logger.info("Server '%s' is disabled — skipping", self.server_name)
                 return
 
@@ -169,6 +171,7 @@ class ServerRunner:
                 "items_checked": items_checked,
                 "unmonitored": count,
                 "error": error,
+                "action": "poll",
             })
 
             logger.info(
@@ -176,6 +179,7 @@ class ServerRunner:
                 self.server_name, duration, count,
                 f" — error: {error}" if error else "",
             )
+            self.current_action = ""
             self._run_lock.release()
 
     # ── Service check ──
@@ -447,6 +451,7 @@ class ServerRunner:
 
         # Wait for any in-progress poll cycle to finish
         self._run_lock.acquire()
+        self.current_action = "re-monitoring"
 
         started_at = time.time()
         count = 0
@@ -513,6 +518,7 @@ class ServerRunner:
                 self.server_name, duration, count,
                 f" — error: {error}" if error else "",
             )
+            self.current_action = ""
             self._run_lock.release()
 
     # ── Radarr re-monitor ──
@@ -696,6 +702,7 @@ class ServerRunner:
             )
             return
 
+        self.current_action = "unmonitoring specials"
         started_at = time.time()
         count = 0
         items_checked = 0
@@ -757,6 +764,7 @@ class ServerRunner:
                 self.server_name, duration, count,
                 f" — error: {error}" if error else "",
             )
+            self.current_action = ""
             self._run_lock.release()
 
     def _unmonitor_specials_sonarr(
@@ -916,6 +924,45 @@ class ArrPoller:
             return False
         threading.Thread(target=runner.run_once, daemon=True).start()
         return True
+
+    def run_server_adhoc(self, server_name: str) -> tuple[bool, str]:
+        """Run a one-off poll for a server, even if the worker is stopped or the server is disabled.
+
+        Creates a temporary ServerRunner if none exists and runs with force=True.
+        Returns (success, message).
+        """
+        settings = self.settings_store.load()
+        server = settings.get_server_by_name(server_name)
+        if not server:
+            return False, f"Server '{server_name}' not found"
+
+        runner = self._runners.get(server_name)
+        if runner and runner.is_running():
+            return False, f"Server '{server_name}' is already running"
+
+        if not runner:
+            runner = ServerRunner(server_name, self.settings_store, self.change_log_store)
+            self._runners[server_name] = runner
+
+        threading.Thread(
+            target=runner.run_once, kwargs={"force": True}, daemon=True,
+        ).start()
+        return True, f"Ad-hoc run started for '{server_name}'"
+
+    def run_all_adhoc(self) -> tuple[bool, str]:
+        """Run a one-off poll for all configured servers, even if the worker is stopped."""
+        settings = self.settings_store.load()
+        if not settings.servers:
+            return False, "No servers configured"
+
+        started: list[str] = []
+        for server in settings.servers:
+            ok, _ = self.run_server_adhoc(server.name)
+            if ok:
+                started.append(server.name)
+        if started:
+            return True, f"Ad-hoc run started for: {', '.join(started)}"
+        return False, "No servers could be started (all may be running already)"
 
     def remonitor_server(self, server_name: str) -> bool:
         """Trigger re-monitor on a specific server. Returns False if not found."""

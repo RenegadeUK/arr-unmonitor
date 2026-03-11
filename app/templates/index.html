@@ -52,6 +52,8 @@
       .badge-bad { background: #7f1d1d; color: #fecaca; }
       .badge-unknown { background: #3f3f46; color: #d4d4d8; }
       .badge-disabled { background: #374151; color: #6b7280; }
+      .badge-activity { background: #1e3a5f; color: #93c5fd; animation: pulse-activity 1.5s ease-in-out infinite; }
+      @keyframes pulse-activity { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
       table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 0.75rem; background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; overflow: hidden; }
       th, td { border: none; border-bottom: 1px solid #31363f; padding: 0.55rem 0.75rem; text-align: left; font-size: 0.9rem; }
       th { background: #262b33; color: #9ca3af; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -209,7 +211,7 @@
         <div class="tile" style="margin-bottom:1.2rem;">
           <h2>Worker <span id="worker-status-badge" class="badge badge-unknown" style="font-size:0.8rem;">--</span></h2>
           <div class="actions">
-            <form method="post" action="/run-now" style="margin:0;"><button type="submit">Run now</button></form>
+            <button onclick="runAllNow()">Run now</button>
             <form method="post" action="/stop-worker" style="margin:0;" id="stop-worker-form"><button type="submit" class="btn-danger">Stop worker</button></form>
             <form method="post" action="/start-worker" style="margin:0;" id="start-worker-form"><button type="submit" class="btn-success">Start worker</button></form>
             <form method="post" action="/clear-history" style="margin:0;"><button type="submit">Clear history</button></form>
@@ -218,42 +220,23 @@
         </div>
 
         <h2>Recent runs</h2>
-        {% if recent_runs %}
         <table>
           <thead>
             <tr>
               <th style="width:2rem;text-align:center;"></th>
               <th>Server</th>
               <th>Type</th>
+              <th>Action</th>
               <th style="text-align:right;">Checked</th>
               <th style="text-align:right;">Unmonitored</th>
               <th style="text-align:right;">Duration</th>
               <th>Time</th>
             </tr>
           </thead>
-          <tbody>
-            {% for run in recent_runs %}
-            <tr class="{% if run.error %}run-err-row{% endif %}">
-              <td style="text-align:center;">{% if run.error %}<span class="run-err" title="{{ run.error }}">&#x2716;</span>{% else %}<span class="run-ok">&#x2714;</span>{% endif %}</td>
-              <td>{{ run.server }}</td>
-              <td>{% if run.server_type %}<span class="type-badge type-{{ run.server_type }}">{{ run.server_type }}</span>{% else %}&mdash;{% endif %}</td>
-              <td class="num">{{ run.items_checked | default(0) }}</td>
-              <td class="num">{% if run.unmonitored %}<strong>{{ run.unmonitored }}</strong>{% else %}0{% endif %}</td>
-              <td class="num">{{ run.duration_seconds }}s</td>
-              <td class="nowrap">{{ run.started_at_display }}</td>
-            </tr>
-            {% if run.error %}
-            <tr class="run-err-row run-err-detail">
-              <td></td>
-              <td colspan="6"><span class="error">{{ run.error }}</span></td>
-            </tr>
-            {% endif %}
-            {% endfor %}
+          <tbody id="recent-runs-body">
+            <tr><td colspan="8" style="color:#9ca3af;">Loading&hellip;</td></tr>
           </tbody>
         </table>
-        {% else %}
-        <p>No runs yet.</p>
-        {% endif %}
 
         <h2>Change log</h2>
         <table>
@@ -603,18 +586,28 @@
           else if (status.ok === true) { bc = 'badge-ok'; bt = 'Connected'; }
           else if (status.ok === false) { bc = 'badge-bad'; bt = 'Disconnected'; }
 
+          // Activity badge
+          let activityHtml = '';
+          if (s.current_action) {
+            const label = s.current_action.charAt(0).toUpperCase() + s.current_action.slice(1) + '...';
+            activityHtml = `<span class="badge badge-activity" style="font-size:0.75rem;margin-left:0.4rem;">${escapeHtml(label)}</span>`;
+          } else if (s.runner_active === false) {
+            activityHtml = '<span class="badge badge-disabled" style="font-size:0.75rem;margin-left:0.4rem;">No runner</span>';
+          }
+
           html += `<div class="dash-card">
             <div class="dash-card-header">
               <span class="type-badge type-${escapeHtml(s.type)}">${escapeHtml(s.type)}</span>
               <h3>${escapeHtml(s.name)}</h3>
               <span class="badge ${bc}">${bt}</span>
+              ${activityHtml}
             </div>
             <div class="dash-card-stat"><span>URL</span><span class="stat-value" style="font-size:0.85rem;color:#9ca3af;">${escapeHtml(s.url || 'Not set')}</span></div>
             <div class="dash-card-stat"><span>Poll Interval</span><span class="stat-value">${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global'}</span></div>
-            <div class="dash-card-stat"><span>Next Run</span><span class="stat-value" id="dash-next-${escapeHtml(s.name)}">--</span></div>
-            <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">--</span></div>
+            <div class="dash-card-stat"><span>Next Run</span><span class="stat-value" id="dash-next-${escapeHtml(s.name)}">${s.seconds_until_next_run != null ? formatCountdown(s.seconds_until_next_run) : '--'}</span></div>
+            <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">${s.last_unmonitored ?? '--'}</span></div>
             <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
-              <form method="post" action="/run-now/${encodeURIComponent(s.name)}" style="margin:0;"><button type="submit" style="font-size:0.82rem;">Run Now</button></form>
+              <button onclick="runServerNow('${escapeHtml(s.name)}')" style="font-size:0.82rem;">Run Now</button>
               <a href="#settings" onclick="switchTab('settings');" style="font-size:0.85rem;">Edit in Settings</a>
             </div>
           </div>`;
@@ -638,20 +631,70 @@
           });
           if (merged.length > 0) renderDashServerCards(merged);
 
-          // Update per-server unmonitored count and next run
-          const unmon = data.last_unmonitored || {};
-          for (const [name, count] of Object.entries(unmon)) {
-            const el = document.getElementById('dash-unmon-' + name);
-            if (el) el.textContent = String(count);
-          }
-          const statusServersForCountdown = data.servers || [];
-          for (const ss of statusServersForCountdown) {
-            const nextEl = document.getElementById('dash-next-' + ss.name);
-            if (nextEl) nextEl.textContent = ss.seconds_until_next_run != null ? formatCountdown(ss.seconds_until_next_run) : '--';
-          }
+          // Update recent runs table
+          renderRecentRuns(data.recent_runs || []);
         } catch (_) {
           applyHealthBadge('error');
         }
+      }
+
+      /* ═══ Dashboard: AJAX Run Now ═══ */
+      async function runServerNow(name) {
+        try {
+          const data = await apiFetch(`/api/servers/${encodeURIComponent(name)}/run`, { method: 'POST' });
+          showToast(data.message || `Run started for ${name}`, true);
+        } catch (err) {
+          showToast(err.message || `Failed to start run for ${name}`, false);
+        }
+      }
+
+      async function runAllNow() {
+        try {
+          const data = await apiFetch('/api/run-all', { method: 'POST' });
+          showToast(data.message || 'Manual run started', true);
+        } catch (err) {
+          showToast(err.message || 'Failed to start run', false);
+        }
+      }
+
+      /* ═══ Dashboard: recent runs table ═══ */
+      const actionLabels = { poll: 'Poll', remonitor: 'Re-monitor', unmonitor_specials: 'Unmonitor Specials' };
+
+      function renderRecentRuns(runs) {
+        const tbody = document.getElementById('recent-runs-body');
+        if (!tbody) return;
+        if (!runs || !runs.length) {
+          tbody.innerHTML = '<tr><td colspan="8" style="color:#9ca3af;">No runs yet.</td></tr>';
+          return;
+        }
+        let html = '';
+        for (const run of runs) {
+          const hasErr = !!run.error;
+          const icon = hasErr
+            ? `<span class="run-err" title="${escapeHtml(run.error)}">&#x2716;</span>`
+            : '<span class="run-ok">&#x2714;</span>';
+          const typeBadge = run.server_type
+            ? `<span class="type-badge type-${escapeHtml(run.server_type)}">${escapeHtml(run.server_type)}</span>`
+            : '&mdash;';
+          const action = actionLabels[run.action] || run.action || 'Poll';
+          const unmon = run.unmonitored ? `<strong>${run.unmonitored}</strong>` : '0';
+          const timeStr = formatTimestamp(run.started_at);
+
+          html += `<tr class="${hasErr ? 'run-err-row' : ''}">
+            <td style="text-align:center;">${icon}</td>
+            <td>${escapeHtml(run.server || '')}</td>
+            <td>${typeBadge}</td>
+            <td>${escapeHtml(action)}</td>
+            <td class="num">${run.items_checked ?? 0}</td>
+            <td class="num">${unmon}</td>
+            <td class="num">${run.duration_seconds ?? 0}s</td>
+            <td class="nowrap">${timeStr}</td>
+          </tr>`;
+          if (hasErr) {
+            html += `<tr class="run-err-row run-err-detail"><td></td><td colspan="7"><span class="error">${escapeHtml(run.error)}</span></td></tr>`;
+          }
+        }
+        tbody.innerHTML = html;
       }
 
       /* ═══ Settings: server list ═══ */

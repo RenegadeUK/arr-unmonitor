@@ -264,14 +264,29 @@ def create_app() -> Flask:
 
     @app.post("/run-now")
     def run_now():
-        poller.run_all()
+        poller.run_all_adhoc()
         return redirect(url_for("index", notice="Manual run started"))
 
     @app.post("/run-now/<server_name>")
     def run_now_server(server_name: str):
-        if poller.run_server(server_name):
-            return redirect(url_for("index", notice=f"Manual run started for {server_name}"))
-        return redirect(url_for("index", error=f"No active runner for '{server_name}'"))
+        ok, msg = poller.run_server_adhoc(server_name)
+        if ok:
+            return redirect(url_for("index", notice=msg))
+        return redirect(url_for("index", error=msg))
+
+    @app.route("/api/servers/<name>/run", methods=["POST"])
+    def api_run_server(name: str):
+        ok, msg = poller.run_server_adhoc(name)
+        if ok:
+            return jsonify({"ok": True, "message": msg})
+        return jsonify({"ok": False, "error": msg}), 409
+
+    @app.route("/api/run-all", methods=["POST"])
+    def api_run_all():
+        ok, msg = poller.run_all_adhoc()
+        if ok:
+            return jsonify({"ok": True, "message": msg})
+        return jsonify({"ok": False, "error": msg}), 409
 
     @app.post("/stop-worker")
     def stop_worker():
@@ -411,6 +426,7 @@ def create_app() -> Flask:
                 runner_info = {
                     "runner_active": runner.is_alive(),
                     "runner_running": runner.is_running(),
+                    "current_action": runner.current_action,
                     "poll_interval_seconds": runner_interval,
                     "last_run": runner.last_run,
                     "last_error": runner.last_error,
