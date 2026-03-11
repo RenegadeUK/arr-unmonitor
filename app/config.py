@@ -25,6 +25,8 @@ class ServerConfig:
     # Sonarr-only cascade toggles
     unmonitor_season: bool = False
     unmonitor_series: bool = False
+    # Re-monitor: skip Specials (Season 0)
+    remonitor_ignore_specials: bool = True
 
 
 @dataclass
@@ -87,6 +89,7 @@ class SettingsStore:
                     poll_interval_seconds=int(raw_interval) if raw_interval is not None else None,
                     unmonitor_season=bool(srv.get("unmonitor_season", False)),
                     unmonitor_series=bool(srv.get("unmonitor_series", False)),
+                    remonitor_ignore_specials=bool(srv.get("remonitor_ignore_specials", True)),
                 )
             )
         return AppSettings(

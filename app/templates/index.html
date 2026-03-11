@@ -71,6 +71,7 @@
       /* ── Change log tweaks ── */
       .cl-title-series { color: #9ca3af; font-size: 0.85rem; }
       .cl-action { display: inline-block; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.76rem; font-weight: 600; background: #374151; color: #d1d5db; }
+      .cl-action-remonitor { background: #14532d; color: #bbf7d0; }
       .cl-quality { color: #a5b4fc; font-size: 0.88rem; }
 
       /* ── Type badges ── */
@@ -135,6 +136,16 @@
       .dash-card-header h3 { margin: 0; font-size: 1rem; }
       .dash-card-stat { display: flex; justify-content: space-between; padding: 0.25rem 0; font-size: 0.9rem; color: #d1d5db; }
       .dash-card-stat .stat-value { font-weight: 700; }
+
+      /* ── Confirmation modal ── */
+      .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; }
+      .modal-overlay.show { display: flex; }
+      .modal { background: #2b313a; border: 1px solid #4b5563; border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; }
+      .modal h3 { margin: 0 0 0.75rem 0; color: #fca5a5; }
+      .modal p { color: #d1d5db; margin: 0.5rem 0; font-size: 0.95rem; line-height: 1.5; }
+      .modal .warning-box { background: #7f1d1d; border: 1px solid #dc2626; border-radius: 8px; padding: 0.75rem; margin: 0.75rem 0; }
+      .modal .warning-box p { color: #fecaca; margin: 0; font-size: 0.9rem; }
+      .modal-actions { display: flex; gap: 0.75rem; margin-top: 1.2rem; justify-content: flex-end; }
     </style>
   </head>
   <body>
@@ -312,9 +323,13 @@
             </div>
             <div id="sf-sonarr-options" class="full-width" style="display:none;">
               <label style="margin-bottom:0.5rem;">Sonarr Cascade Options</label>
-              <div style="display:flex;gap:1.5rem;align-items:center;">
+              <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
                 <label style="font-weight:normal;cursor:pointer;"><input type="checkbox" id="sf-unmonitor-season" style="width:auto;margin-right:0.4rem;accent-color:#16a34a;" /> Unmonitor seasons</label>
                 <label style="font-weight:normal;cursor:pointer;"><input type="checkbox" id="sf-unmonitor-series" style="width:auto;margin-right:0.4rem;accent-color:#16a34a;" /> Unmonitor ended series</label>
+              </div>
+              <label style="margin-bottom:0.5rem;margin-top:0.75rem;">Re-monitor Options</label>
+              <div style="display:flex;gap:1.5rem;align-items:center;">
+                <label style="font-weight:normal;cursor:pointer;"><input type="checkbox" id="sf-remonitor-ignore-specials" style="width:auto;margin-right:0.4rem;accent-color:#f59e0b;" checked /> Ignore Specials (Season 0)</label>
               </div>
             </div>
           </div>
@@ -402,6 +417,37 @@
       </div><!-- /tab-logs -->
 
     </div><!-- /wrap -->
+
+    <!-- Re-monitor confirmation modal -->
+    <div id="remonitor-modal" class="modal-overlay">
+      <div class="modal">
+        <h3>⚠ Danger: Re-monitor Everything</h3>
+        <p id="remonitor-description"></p>
+        <div class="warning-box">
+          <p>⚠ The server will be <strong>automatically disabled</strong> after re-monitoring completes to prevent the poller from immediately un-monitoring everything again.</p>
+        </div>
+        <p style="font-size:0.88rem;color:#9ca3af;">You will need to manually re-enable it when ready.</p>
+        <div class="modal-actions">
+          <button onclick="hideRemonitorConfirm()">Cancel</button>
+          <button class="btn-danger" id="remonitor-confirm-btn" onclick="executeRemonitor()">Yes, Re-monitor Everything</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unmonitor Specials confirmation modal -->
+    <div id="unmonitor-specials-modal" class="modal-overlay">
+      <div class="modal">
+        <h3>⚠ Unmonitor All Specials</h3>
+        <p id="unmonitor-specials-description"></p>
+        <div class="warning-box">
+          <p>⚠ This will unmonitor all <strong>Season 0 (Specials)</strong> episodes and the Season 0 entry itself across all series on this server.</p>
+        </div>
+        <div class="modal-actions">
+          <button onclick="hideUnmonitorSpecialsConfirm()">Cancel</button>
+          <button class="btn-danger" onclick="executeUnmonitorSpecials()">Yes, Unmonitor Specials</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       /* ═══ Tab switching ═══ */
@@ -640,13 +686,16 @@
               <div><div class="detail-label">API Key</div><div>${escapeHtml(s.api_key || '***')}</div></div>
               <div><div class="detail-label">Poll Interval</div><div>${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global default'}</div></div>
               ${s.type === 'sonarr' ? `<div><div class="detail-label">Unmonitor Seasons</div><div>${s.unmonitor_season ? 'Yes' : 'No'}</div></div>
-              <div><div class="detail-label">Unmonitor Series</div><div>${s.unmonitor_series ? 'Yes' : 'No'}</div></div>` : ''}
+              <div><div class="detail-label">Unmonitor Series</div><div>${s.unmonitor_series ? 'Yes' : 'No'}</div></div>
+              <div><div class="detail-label">Re-monitor: Ignore Specials</div><div>${s.remonitor_ignore_specials ? 'Yes' : 'No'}</div></div>` : ''}
               <div><div class="detail-label">Status</div><div>${escapeHtml(status.message || 'Not checked yet')}</div></div>
             </div>
             <div class="server-card-actions">
-              <button onclick="editServer('${escapeHtml(s.name)}')">Edit</button>
-              <button class="btn-success" onclick="testServer('${escapeHtml(s.name)}')">Test</button>
-              <button class="btn-danger" onclick="deleteServer('${escapeHtml(s.name)}')">Delete</button>
+              <button onclick="editServer('${escapeHtml(s.name)}')">✏ Edit</button>
+              <button class="btn-success" onclick="testServer('${escapeHtml(s.name)}')">✔ Test</button>
+              <button class="btn-danger" onclick="deleteServer('${escapeHtml(s.name)}')">✖ Delete</button>
+              ${s.type === 'sonarr' ? `<button class="btn-danger" onclick="showUnmonitorSpecialsConfirm('${escapeHtml(s.name)}')" style="margin-left:auto;">⚠ Unmonitor Specials</button>` : '<span style="margin-left:auto;"></span>'}
+              <button class="btn-danger" onclick="showRemonitorConfirm('${escapeHtml(s.name)}')">⚠ Re-monitor All</button>
             </div>
           </div>`;
         }
@@ -681,6 +730,7 @@
         document.getElementById('sf-poll-interval').value = '';
         document.getElementById('sf-unmonitor-season').checked = false;
         document.getElementById('sf-unmonitor-series').checked = false;
+        document.getElementById('sf-remonitor-ignore-specials').checked = true;
         toggleSonarrOptions();
         document.getElementById('server-form-section').style.display = '';
         document.getElementById('sf-name').focus();
@@ -705,6 +755,7 @@
         document.getElementById('sf-enabled').value = s.enabled ? 'true' : 'false';
         document.getElementById('sf-unmonitor-season').checked = !!s.unmonitor_season;
         document.getElementById('sf-unmonitor-series').checked = !!s.unmonitor_series;
+        document.getElementById('sf-remonitor-ignore-specials').checked = s.remonitor_ignore_specials !== false;
         toggleSonarrOptions();
         document.getElementById('sf-poll-interval').value = s.poll_interval_seconds != null ? s.poll_interval_seconds : '';
         document.getElementById('server-form-section').style.display = '';
@@ -726,6 +777,7 @@
           poll_interval_seconds: rawInterval ? parseInt(rawInterval, 10) : null,
           unmonitor_season: document.getElementById('sf-unmonitor-season').checked,
           unmonitor_series: document.getElementById('sf-unmonitor-series').checked,
+          remonitor_ignore_specials: document.getElementById('sf-remonitor-ignore-specials').checked,
         };
         if (!payload.name) { showToast('Server name is required', false); return; }
         try {
@@ -820,6 +872,7 @@
             const linkUrl = c.link_url || '';
             const quality = c.quality || '\u2014';
             const action = c.action || '';
+            const isRemonitor = action.toLowerCase().startsWith('re-monitored');
             let titleHtml = '';
             if (seriesTitle) titleHtml += `<span class="cl-title-series">${escapeHtml(seriesTitle)} \u2014</span> `;
             titleHtml += linkUrl
@@ -830,7 +883,7 @@
               <td><span class="src-badge ${sourceBadgeClass(svc)}">${escapeHtml(svc)}</span></td>
               <td>${titleHtml}</td>
               <td class="num"><span class="cl-quality">${escapeHtml(quality)}</span></td>
-              <td><span class="cl-action">${escapeHtml(action)}</span></td>
+              <td><span class="cl-action${isRemonitor ? ' cl-action-remonitor' : ''}">${escapeHtml(action)}</span></td>
             </tr>`;
           }
           tbody.innerHTML = html;
@@ -879,6 +932,91 @@
       document.getElementById('log-level-filter').addEventListener('change', refreshLogs);
       document.getElementById('log-limit').addEventListener('change', refreshLogs);
       document.getElementById('log-source-filter').addEventListener('change', refreshLogs);
+
+      /* ═══ Re-monitor modal ═══ */
+      let remonitorTarget = null;
+
+      function showRemonitorConfirm(target) {
+        remonitorTarget = target;
+        const descEl = document.getElementById('remonitor-description');
+        if (target === '__all__') {
+          descEl.innerHTML = 'This will set <strong>all unmonitored items</strong> with files back to <strong>monitored</strong> on <strong>ALL servers</strong>.';
+        } else {
+          const server = cachedServers.find(s => s.name === target);
+          const type = server ? server.type : '';
+          const items = type === 'radarr' ? 'movies' : type === 'sonarr' ? 'episodes, seasons, and series' : 'items';
+          descEl.innerHTML = `This will set <strong>all unmonitored ${escapeHtml(items)}</strong> with files back to <strong>monitored</strong> on <strong>"${escapeHtml(target)}"</strong>.`;
+        }
+        document.getElementById('remonitor-modal').classList.add('show');
+      }
+
+      function hideRemonitorConfirm() {
+        remonitorTarget = null;
+        document.getElementById('remonitor-modal').classList.remove('show');
+      }
+
+      async function executeRemonitor() {
+        const target = remonitorTarget;
+        hideRemonitorConfirm();
+        if (!target) return;
+
+        if (target === '__all__') {
+          try {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/remonitor-all';
+            document.body.appendChild(form);
+            form.submit();
+          } catch (err) {
+            showToast('Re-monitor failed: ' + err.message, false);
+          }
+        } else {
+          try {
+            const data = await apiFetch(`/api/servers/${encodeURIComponent(target)}/remonitor`, { method: 'POST' });
+            showToast(data.message || `Re-monitor started for ${target}`, true);
+            setTimeout(() => { refreshStatus(); refreshServerList(); }, 2000);
+          } catch (err) {
+            showToast(err.message, false);
+          }
+        }
+      }
+
+      // Close modal on backdrop click
+      document.getElementById('remonitor-modal').addEventListener('click', function(e) {
+        if (e.target === this) hideRemonitorConfirm();
+      });
+
+      /* ═══ Unmonitor Specials modal ═══ */
+      let unmonitorSpecialsTarget = null;
+
+      function showUnmonitorSpecialsConfirm(serverName) {
+        unmonitorSpecialsTarget = serverName;
+        document.getElementById('unmonitor-specials-description').innerHTML =
+          `This will unmonitor all <strong>monitored Season 0 (Specials)</strong> episodes on <strong>"${escapeHtml(serverName)}"</strong>.`;
+        document.getElementById('unmonitor-specials-modal').classList.add('show');
+      }
+
+      function hideUnmonitorSpecialsConfirm() {
+        unmonitorSpecialsTarget = null;
+        document.getElementById('unmonitor-specials-modal').classList.remove('show');
+      }
+
+      async function executeUnmonitorSpecials() {
+        const target = unmonitorSpecialsTarget;
+        hideUnmonitorSpecialsConfirm();
+        if (!target) return;
+        try {
+          const data = await apiFetch(`/api/servers/${encodeURIComponent(target)}/unmonitor-specials`, { method: 'POST' });
+          showToast(data.message || `Unmonitor-specials started for ${target}`, true);
+          setTimeout(() => { refreshStatus(); refreshServerList(); }, 2000);
+        } catch (err) {
+          showToast(err.message, false);
+        }
+      }
+
+      document.getElementById('unmonitor-specials-modal').addEventListener('click', function(e) {
+        if (e.target === this) hideUnmonitorSpecialsConfirm();
+      });
 
       /* ═══ Init ═══ */
       async function init() {

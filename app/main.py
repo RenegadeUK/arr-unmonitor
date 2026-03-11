@@ -120,6 +120,7 @@ def create_app() -> Flask:
                 "api_key_full": s.api_key,
                 "unmonitor_season": s.unmonitor_season,
                 "unmonitor_series": s.unmonitor_series,
+                "remonitor_ignore_specials": s.remonitor_ignore_specials,
                 "enabled": s.enabled,
                 "poll_interval_seconds": s.poll_interval_seconds,
                 "runner_active": runner is not None and runner.is_alive() if runner else False,
@@ -152,6 +153,7 @@ def create_app() -> Flask:
             api_key=str(data.get("api_key", "")).strip(),
             unmonitor_season=bool(data.get("unmonitor_season", False)),
             unmonitor_series=bool(data.get("unmonitor_series", False)),
+            remonitor_ignore_specials=bool(data.get("remonitor_ignore_specials", True)),
             enabled=bool(data.get("enabled", True)),
             poll_interval_seconds=max(int(raw_interval), 30) if raw_interval else None,
         )
@@ -184,6 +186,7 @@ def create_app() -> Flask:
         server.api_key = str(data.get("api_key", server.api_key)).strip()
         server.unmonitor_season = bool(data.get("unmonitor_season", server.unmonitor_season))
         server.unmonitor_series = bool(data.get("unmonitor_series", server.unmonitor_series))
+        server.remonitor_ignore_specials = bool(data.get("remonitor_ignore_specials", server.remonitor_ignore_specials))
         server.enabled = bool(data.get("enabled", server.enabled))
         # Per-server poll interval (null = use global)
         raw_interval = data.get("poll_interval_seconds")
@@ -291,6 +294,42 @@ def create_app() -> Flask:
     def clear_change_log():
         change_log_store.clear()
         return redirect(url_for("index", notice="Change log cleared"))
+
+    # ──────────────────────────────────────────────────────
+    # Re-monitor (dangerous)
+    # ──────────────────────────────────────────────────────
+
+    @app.route("/api/servers/<name>/remonitor", methods=["POST"])
+    def api_remonitor_server(name: str):
+        settings = settings_store.load()
+        server = settings.get_server_by_name(name)
+        if not server:
+            return jsonify({"error": f"Server '{name}' not found"}), 404
+
+        if poller.remonitor_server(name):
+            logger.info("Re-monitor triggered for '%s' via UI", name)
+            return jsonify({"ok": True, "message": f"Re-monitor started for '{name}'. Server will be auto-disabled after completion."})
+        return jsonify({"error": f"No active runner for '{name}'. Enable the server first."}), 409
+
+    @app.post("/remonitor-all")
+    def remonitor_all():
+        poller.remonitor_all()
+        logger.info("Re-monitor triggered for ALL servers via UI")
+        return redirect(url_for("index", notice="Re-monitor started for all servers. Servers will be auto-disabled after completion."))
+
+    @app.route("/api/servers/<name>/unmonitor-specials", methods=["POST"])
+    def api_unmonitor_specials(name: str):
+        settings = settings_store.load()
+        server = settings.get_server_by_name(name)
+        if not server:
+            return jsonify({"error": f"Server '{name}' not found"}), 404
+        if server.type != "sonarr":
+            return jsonify({"error": "Unmonitor-specials is only available for Sonarr servers"}), 400
+
+        if poller.unmonitor_specials_server(name):
+            logger.info("Unmonitor-specials triggered for '%s' via UI", name)
+            return jsonify({"ok": True, "message": f"Unmonitor-specials started for '{name}'."})
+        return jsonify({"error": f"No active runner for '{name}'. Enable the server first."}), 409
 
     # ──────────────────────────────────────────────────────
     # Data APIs

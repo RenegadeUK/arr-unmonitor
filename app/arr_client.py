@@ -103,6 +103,22 @@ class BaseArrClient:
         )
         self._request("PUT", f"{self.resource_path}/{item_id}", json=updated)
 
+    def monitor_item(self, item: dict[str, Any]) -> None:
+        updated = dict(item)
+        updated["monitored"] = True
+        item_id = updated.get("id")
+        if item_id is None:
+            return
+        title = item.get("title", f"ID {item_id}")
+        slug = item.get("titleSlug", "")
+        link_url = f"{self.base_url}/{self.resource_path}/{slug}" if slug else ""
+        self.logger.info(
+            "Re-monitoring '%s' (id=%s)",
+            title, item_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"{self.resource_path}/{item_id}", json=updated)
+
 
 class RadarrClient(BaseArrClient):
     resource_path = "movie"
@@ -143,6 +159,63 @@ class SonarrClient(BaseArrClient):
             extra={"link_url": link_url},
         )
         self._request("PUT", f"episode/{episode_id}", json=updated)
+
+    def monitor_episode(self, episode: dict[str, Any], series_title: str = "", series_slug: str = "") -> None:
+        updated = dict(episode)
+        updated["monitored"] = True
+        episode_id = updated.get("id")
+        if episode_id is None:
+            return
+        ep_label = episode.get("title", f"ID {episode_id}")
+        season = episode.get("seasonNumber", "?")
+        ep_num = episode.get("episodeNumber", "?")
+        series_ctx = f"'{series_title}' " if series_title else ""
+        link_url = f"{self.base_url}/series/{series_slug}" if series_slug else ""
+        self.logger.info(
+            "Re-monitoring %sS%02dE%02d '%s' (id=%s)",
+            series_ctx,
+            season if isinstance(season, int) else 0,
+            ep_num if isinstance(ep_num, int) else 0,
+            ep_label, episode_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"episode/{episode_id}", json=updated)
+
+    def monitor_season(
+        self, series: dict[str, Any], season_number: int,
+    ) -> None:
+        """Set monitored=True on a specific season within a series."""
+        updated = dict(series)
+        seasons = updated.get("seasons", [])
+        for s in seasons:
+            if s.get("seasonNumber") == season_number:
+                s["monitored"] = True
+                break
+        series_id = updated.get("id")
+        series_title = updated.get("title", f"ID {series_id}")
+        slug = updated.get("titleSlug", "")
+        link_url = f"{self.base_url}/series/{slug}" if slug else ""
+        self.logger.info(
+            "Re-monitoring '%s' Season %d (id=%s)",
+            series_title, season_number, series_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"series/{series_id}", json=updated)
+
+    def monitor_series(self, series: dict[str, Any]) -> None:
+        """Set monitored=True on an entire series."""
+        updated = dict(series)
+        updated["monitored"] = True
+        series_id = updated.get("id")
+        series_title = updated.get("title", f"ID {series_id}")
+        slug = updated.get("titleSlug", "")
+        link_url = f"{self.base_url}/series/{slug}" if slug else ""
+        self.logger.info(
+            "Re-monitoring series '%s' (id=%s)",
+            series_title, series_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"series/{series_id}", json=updated)
 
     def unmonitor_season(
         self, series: dict[str, Any], season_number: int,

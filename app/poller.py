@@ -425,6 +425,423 @@ class ServerRunner:
             "link_url": series_url,
         })
 
+    # ── Re-monitor: single cycle ──
+
+    def run_remonitor(self) -> None:
+        """Re-monitor all unmonitored items with files for this server.
+
+        The server is disabled *before* acquiring the lock so that no
+        new poll cycle can start while we wait for a running one to
+        finish.  The server stays disabled after completion.
+        """
+        # Pre-disable the server to prevent new poll cycles from starting
+        settings = self.settings_store.load()
+        server = settings.get_server_by_name(self.server_name)
+        if server:
+            server.enabled = False
+            self.settings_store.save(settings)
+            logger.info(
+                "Pre-disabled '%s' before re-monitor",
+                self.server_name,
+            )
+
+        # Wait for any in-progress poll cycle to finish
+        self._run_lock.acquire()
+
+        started_at = time.time()
+        count = 0
+        items_checked = 0
+        server_type = ""
+        error = ""
+
+        try:
+            settings = self.settings_store.load()
+            server = settings.get_server_by_name(self.server_name)
+            if not server:
+                error = f"Server '{self.server_name}' not found in settings"
+                logger.warning(error)
+                return
+
+            server_type = server.type
+            client = client_from_server(server)
+            ok, message = self._check_service(client)
+            if not ok:
+                error = message
+                return
+
+            if server.type == "radarr":
+                count, items_checked = self._remonitor_radarr(server, client)
+            elif server.type == "sonarr":
+                count, items_checked = self._remonitor_sonarr(server, client)
+            else:
+                logger.warning("Unknown server type '%s' for '%s'", server.type, server.name)
+
+            logger.info(
+                "Server '%s' stays disabled after re-monitor (%d items)",
+                self.server_name, count,
+            )
+
+        except ArrClientError as exc:
+            error = str(exc)
+            logger.error("Re-monitor failed for '%s' — %s", self.server_name, exc)
+        except Exception as exc:
+            error = f"Unexpected error: {exc}"
+            logger.error(
+                "Unexpected error re-monitoring '%s': %s", self.server_name, exc, exc_info=True,
+            )
+        finally:
+            finished_at = time.time()
+            self.last_run = finished_at
+            self.last_error = error
+            self.last_unmonitored_count = count
+            duration = round(finished_at - started_at, 3)
+
+            self.recent_runs.appendleft({
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_seconds": duration,
+                "server": self.server_name,
+                "server_type": server_type,
+                "items_checked": items_checked,
+                "unmonitored": count,
+                "error": error,
+                "action": "remonitor",
+            })
+
+            logger.info(
+                "Re-monitor for '%s' completed in %.3fs — re-monitored: %d%s",
+                self.server_name, duration, count,
+                f" — error: {error}" if error else "",
+            )
+            self._run_lock.release()
+
+    # ── Radarr re-monitor ──
+
+    def _remonitor_radarr(
+        self,
+        server: ServerConfig,
+        radarr_client: RadarrClient | BaseArrClient,
+    ) -> tuple[int, int]:
+        count = 0
+        items = radarr_client.get_items()
+        items_checked = len(items)
+        unmonitored_with_file = sum(
+            1 for i in items if not i.get("monitored") and i.get("hasFile")
+        )
+        logger.info(
+            "Re-monitor: evaluating %d movies (%d unmonitored with files)",
+            items_checked, unmonitored_with_file,
+            extra={"source_label": radarr_client.label},
+        )
+        for item in items:
+            if item.get("monitored", True) or not item.get("hasFile", False):
+                continue
+
+            movie_file = item.get("movieFile")
+            quality_name = _file_quality_name(movie_file) if isinstance(movie_file, dict) else ""
+            title = item.get("title", "Unknown")
+            year = item.get("year", "")
+            slug = item.get("titleSlug", "")
+            movie_url = f"{radarr_client.base_url}/movie/{slug}" if slug else ""
+            logger.info(
+                "Re-monitoring movie '%s' (%s) — quality '%s'",
+                title, year, quality_name,
+                extra={"source_label": radarr_client.label, "link_url": movie_url},
+            )
+            radarr_client.monitor_item(item)
+            _log_remonitor_change(
+                self.change_log_store,
+                server.name, item,
+                quality_name=quality_name,
+                link_url=movie_url,
+            )
+            count += 1
+        return count, items_checked
+
+    # ── Sonarr re-monitor ──
+
+    def _remonitor_sonarr(
+        self,
+        server: ServerConfig,
+        sonarr_client: SonarrClient | BaseArrClient,
+    ) -> tuple[int, int]:
+        count = 0
+        episodes_checked = 0
+        series_list = sonarr_client.get_items()
+        logger.info(
+            "Re-monitor: evaluating %d series",
+            len(series_list),
+            extra={"source_label": sonarr_client.label},
+        )
+        for item in series_list:
+            series_id = item.get("id")
+            if not isinstance(series_id, int):
+                continue
+
+            series_title = item.get("title", f"Series {series_id}")
+            series_slug = item.get("titleSlug", "")
+            series_url = f"{sonarr_client.base_url}/series/{series_slug}" if series_slug else ""
+
+            episodes = sonarr_client.get_episodes(series_id)
+            episode_files = sonarr_client.get_episode_files(series_id)
+
+            episode_file_by_id: dict[int, dict[str, object]] = {}
+            for episode_file in episode_files:
+                file_id = episode_file.get("id")
+                if isinstance(file_id, int):
+                    episode_file_by_id[file_id] = episode_file
+
+            ignore_specials = server.remonitor_ignore_specials
+
+            # Re-monitor unmonitored episodes that have files
+            for episode in episodes:
+                if episode.get("monitored", True):
+                    continue
+                if ignore_specials and episode.get("seasonNumber") == 0:
+                    continue
+                episode_file_id = episode.get("episodeFileId")
+                if not isinstance(episode_file_id, int):
+                    continue
+                episode_file = episode_file_by_id.get(episode_file_id)
+                if not episode_file:
+                    continue
+                episodes_checked += 1
+
+                quality_name = _file_quality_name(episode_file)
+                ep_title = episode.get("title", "")
+                season = episode.get("seasonNumber", "?")
+                ep_num = episode.get("episodeNumber", "?")
+                logger.info(
+                    "Re-monitoring '%s' S%02dE%02d '%s' — quality '%s'",
+                    series_title,
+                    season if isinstance(season, int) else 0,
+                    ep_num if isinstance(ep_num, int) else 0,
+                    ep_title, quality_name,
+                    extra={"source_label": sonarr_client.label, "link_url": series_url},
+                )
+                sonarr_client.monitor_episode(episode, series_title=series_title, series_slug=series_slug)
+                _log_remonitor_sonarr_episode(
+                    self.change_log_store,
+                    episode, series_id,
+                    server_name=server.name,
+                    series_title=series_title,
+                    quality_name=quality_name,
+                    link_url=series_url,
+                )
+                count += 1
+
+            # Re-monitor unmonitored seasons (if they have episodes with files)
+            if isinstance(sonarr_client, SonarrClient):
+                seasons = item.get("seasons")
+                if isinstance(seasons, list):
+                    eps_by_season: dict[int, list[dict[str, object]]] = {}
+                    for ep in episodes:
+                        sn = ep.get("seasonNumber")
+                        if isinstance(sn, int):
+                            eps_by_season.setdefault(sn, []).append(ep)
+
+                    for season in seasons:
+                        sn = season.get("seasonNumber")
+                        if not isinstance(sn, int) or season.get("monitored", True):
+                            continue
+                        if ignore_specials and sn == 0:
+                            continue
+                        season_eps = eps_by_season.get(sn, [])
+                        if not season_eps:
+                            continue
+                        logger.info(
+                            "Re-monitoring '%s' Season %d",
+                            series_title, sn,
+                            extra={"source_label": sonarr_client.label, "link_url": series_url},
+                        )
+                        sonarr_client.monitor_season(item, sn)
+                        self.change_log_store.append({
+                            "service": server.name,
+                            "series_title": str(series_title),
+                            "item_id": series_id,
+                            "title": f"Season {sn}",
+                            "quality": "",
+                            "action": "Re-monitored season",
+                            "link_url": series_url,
+                        })
+
+            # Re-monitor the series itself if unmonitored
+            if not item.get("monitored", True) and isinstance(sonarr_client, SonarrClient):
+                logger.info(
+                    "Re-monitoring series '%s'",
+                    series_title,
+                    extra={"source_label": sonarr_client.label, "link_url": series_url},
+                )
+                sonarr_client.monitor_series(item)
+                self.change_log_store.append({
+                    "service": server.name,
+                    "series_title": str(series_title),
+                    "item_id": series_id,
+                    "title": str(series_title),
+                    "quality": "",
+                    "action": "Re-monitored series",
+                    "link_url": series_url,
+                })
+
+        return count, episodes_checked
+
+    # ── Unmonitor specials (Season 0) ──
+
+    def run_unmonitor_specials(self) -> None:
+        """Unmonitor all monitored Season 0 (Specials) episodes for this Sonarr server."""
+        if not self._run_lock.acquire(timeout=30):
+            logger.warning(
+                "Unmonitor-specials skipped for '%s' — a poll cycle is running. Try again shortly.",
+                self.server_name,
+            )
+            return
+
+        started_at = time.time()
+        count = 0
+        items_checked = 0
+        server_type = ""
+        error = ""
+
+        try:
+            settings = self.settings_store.load()
+            server = settings.get_server_by_name(self.server_name)
+            if not server:
+                error = f"Server '{self.server_name}' not found in settings"
+                logger.warning(error)
+                return
+
+            if server.type != "sonarr":
+                error = f"Server '{self.server_name}' is not a Sonarr instance"
+                logger.warning(error)
+                return
+
+            server_type = server.type
+            client = client_from_server(server)
+            ok, message = self._check_service(client)
+            if not ok:
+                error = message
+                return
+
+            count, items_checked = self._unmonitor_specials_sonarr(server, client)
+
+        except ArrClientError as exc:
+            error = str(exc)
+            logger.error("Unmonitor-specials failed for '%s' — %s", self.server_name, exc)
+        except Exception as exc:
+            error = f"Unexpected error: {exc}"
+            logger.error(
+                "Unexpected error unmonitoring specials '%s': %s",
+                self.server_name, exc, exc_info=True,
+            )
+        finally:
+            finished_at = time.time()
+            self.last_run = finished_at
+            self.last_error = error
+            self.last_unmonitored_count = count
+            duration = round(finished_at - started_at, 3)
+
+            self.recent_runs.appendleft({
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_seconds": duration,
+                "server": self.server_name,
+                "server_type": server_type,
+                "items_checked": items_checked,
+                "unmonitored": count,
+                "error": error,
+                "action": "unmonitor_specials",
+            })
+
+            logger.info(
+                "Unmonitor-specials for '%s' completed in %.3fs — unmonitored: %d%s",
+                self.server_name, duration, count,
+                f" — error: {error}" if error else "",
+            )
+            self._run_lock.release()
+
+    def _unmonitor_specials_sonarr(
+        self,
+        server: ServerConfig,
+        sonarr_client: SonarrClient | BaseArrClient,
+    ) -> tuple[int, int]:
+        count = 0
+        specials_checked = 0
+        series_list = sonarr_client.get_items()
+        logger.info(
+            "Unmonitor-specials: evaluating %d series",
+            len(series_list),
+            extra={"source_label": sonarr_client.label},
+        )
+        for item in series_list:
+            series_id = item.get("id")
+            if not isinstance(series_id, int):
+                continue
+
+            series_title = item.get("title", f"Series {series_id}")
+            series_slug = item.get("titleSlug", "")
+            series_url = (
+                f"{sonarr_client.base_url}/series/{series_slug}" if series_slug else ""
+            )
+
+            episodes = sonarr_client.get_episodes(series_id)
+
+            for episode in episodes:
+                if episode.get("seasonNumber") != 0:
+                    continue
+                specials_checked += 1
+                if not episode.get("monitored", False):
+                    continue
+
+                ep_title = episode.get("title", "")
+                ep_num = episode.get("episodeNumber", "?")
+                logger.info(
+                    "Unmonitoring special '%s' S00E%02d '%s'",
+                    series_title,
+                    ep_num if isinstance(ep_num, int) else 0,
+                    ep_title,
+                    extra={"source_label": sonarr_client.label, "link_url": series_url},
+                )
+                sonarr_client.unmonitor_episode(
+                    episode, series_title=series_title, series_slug=series_slug,
+                )
+                _log_unmonitor_special_episode(
+                    self.change_log_store,
+                    episode, series_id,
+                    server_name=server.name,
+                    series_title=series_title,
+                    link_url=series_url,
+                )
+                count += 1
+
+            # Unmonitor Season 0 itself if monitored
+            if isinstance(sonarr_client, SonarrClient):
+                seasons = item.get("seasons")
+                if isinstance(seasons, list):
+                    for season in seasons:
+                        sn = season.get("seasonNumber")
+                        if sn != 0 or not season.get("monitored", False):
+                            continue
+                        logger.info(
+                            "Unmonitoring '%s' Season 0 (Specials)",
+                            series_title,
+                            extra={
+                                "source_label": sonarr_client.label,
+                                "link_url": series_url,
+                            },
+                        )
+                        sonarr_client.unmonitor_season(item, 0)
+                        self.change_log_store.append({
+                            "service": server.name,
+                            "series_title": str(series_title),
+                            "item_id": series_id,
+                            "title": "Season 0 (Specials)",
+                            "quality": "",
+                            "action": "Unmonitored season",
+                            "link_url": series_url,
+                        })
+
+        return count, specials_checked
+
 
 # ─────────────────────────────────────────────────────────
 # ArrPoller — coordinator managing per-server runners
@@ -498,6 +915,36 @@ class ArrPoller:
         if not runner:
             return False
         threading.Thread(target=runner.run_once, daemon=True).start()
+        return True
+
+    def remonitor_server(self, server_name: str) -> bool:
+        """Trigger re-monitor on a specific server. Returns False if not found."""
+        runner = self._runners.get(server_name)
+        if not runner:
+            return False
+
+        def _run_and_sync() -> None:
+            runner.run_remonitor()
+            self.sync_runners()
+
+        threading.Thread(target=_run_and_sync, daemon=True).start()
+        return True
+
+    def remonitor_all(self) -> None:
+        """Trigger re-monitor on every active runner."""
+        for runner in list(self._runners.values()):
+            def _run_and_sync(r: ServerRunner = runner) -> None:
+                r.run_remonitor()
+                self.sync_runners()
+
+            threading.Thread(target=_run_and_sync, daemon=True).start()
+
+    def unmonitor_specials_server(self, server_name: str) -> bool:
+        """Unmonitor all specials on a Sonarr server. Returns False if not found."""
+        runner = self._runners.get(server_name)
+        if not runner:
+            return False
+        threading.Thread(target=runner.run_unmonitor_specials, daemon=True).start()
         return True
 
     # ── Aggregated status ──
@@ -638,6 +1085,89 @@ def _log_change(
             "title": display_title,
             "quality": quality_name,
             "action": "Unmonitored movie",
+            "link_url": link_url,
+        }
+    )
+
+
+def _log_remonitor_change(
+    store: ChangeLogStore,
+    server_name: str,
+    item: dict[str, object],
+    *,
+    quality_name: str = "",
+    link_url: str = "",
+) -> None:
+    title = item.get("title") or item.get("sortTitle") or "Unknown"
+    year = item.get("year", "")
+    display_title = f"{title} ({year})" if year else str(title)
+    store.append(
+        {
+            "service": server_name,
+            "item_id": item.get("id"),
+            "title": display_title,
+            "quality": quality_name,
+            "action": "Re-monitored movie",
+            "link_url": link_url,
+        }
+    )
+
+
+def _log_remonitor_sonarr_episode(
+    store: ChangeLogStore,
+    episode: dict[str, object],
+    series_id: int,
+    *,
+    server_name: str = "Sonarr",
+    series_title: str = "",
+    quality_name: str = "",
+    link_url: str = "",
+) -> None:
+    season = episode.get("seasonNumber")
+    episode_number = episode.get("episodeNumber")
+    title = episode.get("title")
+    label = f"Series {series_id}"
+    if isinstance(season, int) and isinstance(episode_number, int):
+        label = f"S{season:02d}E{episode_number:02d}"
+    if isinstance(title, str) and title.strip():
+        label = f"{label} - {title.strip()}"
+    store.append(
+        {
+            "service": server_name,
+            "series_title": series_title,
+            "item_id": episode.get("id"),
+            "title": label,
+            "quality": quality_name,
+            "action": "Re-monitored episode",
+            "link_url": link_url,
+        }
+    )
+
+
+def _log_unmonitor_special_episode(
+    store: ChangeLogStore,
+    episode: dict[str, object],
+    series_id: int,
+    *,
+    server_name: str = "Sonarr",
+    series_title: str = "",
+    link_url: str = "",
+) -> None:
+    episode_number = episode.get("episodeNumber")
+    title = episode.get("title")
+    label = f"Series {series_id}"
+    if isinstance(episode_number, int):
+        label = f"S00E{episode_number:02d}"
+    if isinstance(title, str) and title.strip():
+        label = f"{label} - {title.strip()}"
+    store.append(
+        {
+            "service": server_name,
+            "series_title": series_title,
+            "item_id": episode.get("id"),
+            "title": label,
+            "quality": "",
+            "action": "Unmonitored special",
             "link_url": link_url,
         }
     )
