@@ -211,14 +211,6 @@ class ServerRunner:
         server: ServerConfig,
         radarr_client: RadarrClient | BaseArrClient,
     ) -> tuple[int, int, str]:
-        target_quality = server.target_quality.strip()
-        if not target_quality:
-            logger.warning(
-                "Target quality text is not set — skipping processing",
-                extra={"source_label": radarr_client.label},
-            )
-            return 0, 0, f"Set target quality text for {server.name}"
-
         count = 0
         items = radarr_client.get_items()
         items_checked = len(items)
@@ -226,37 +218,39 @@ class ServerRunner:
             1 for i in items if i.get("monitored") and i.get("hasFile")
         )
         logger.info(
-            "Evaluating %d movies (%d monitored with files, target quality: '%s')",
-            items_checked, monitored_with_file, target_quality,
+            "Evaluating %d movies (%d monitored with files)",
+            items_checked, monitored_with_file,
             extra={"source_label": radarr_client.label},
         )
         for item in items:
-            profile_id = item.get(radarr_client.profile_key)
-            quality_name = _radarr_quality_name(item)
-            quality_match = _quality_text_matches(quality_name, target_quality)
+            if not item.get("monitored", False) or not item.get("hasFile", False):
+                continue
 
-            if (
-                item.get("monitored", False)
-                and item.get("hasFile", False)
-                and quality_match
-            ):
-                title = item.get("title", "Unknown")
-                year = item.get("year", "")
-                slug = item.get("titleSlug", "")
-                movie_url = f"{radarr_client.base_url}/movie/{slug}" if slug else ""
-                logger.info(
-                    "Unmonitoring movie '%s' (%s) — file quality '%s' matches target '%s'",
-                    title, year, quality_name, target_quality,
-                    extra={"source_label": radarr_client.label, "link_url": movie_url},
-                )
-                radarr_client.unmonitor_item(item)
-                _log_change(
-                    self.change_log_store,
-                    server.name, item,
-                    quality_name=quality_name,
-                    link_url=movie_url,
-                )
-                count += 1
+            movie_file = item.get("movieFile")
+            if not isinstance(movie_file, dict):
+                continue
+            # Use Radarr's own cutoff calculation
+            if movie_file.get("qualityCutoffNotMet", True):
+                continue
+
+            quality_name = _file_quality_name(movie_file)
+            title = item.get("title", "Unknown")
+            year = item.get("year", "")
+            slug = item.get("titleSlug", "")
+            movie_url = f"{radarr_client.base_url}/movie/{slug}" if slug else ""
+            logger.info(
+                "Unmonitoring movie '%s' (%s) — quality '%s' meets cutoff",
+                title, year, quality_name,
+                extra={"source_label": radarr_client.label, "link_url": movie_url},
+            )
+            radarr_client.unmonitor_item(item)
+            _log_change(
+                self.change_log_store,
+                server.name, item,
+                quality_name=quality_name,
+                link_url=movie_url,
+            )
+            count += 1
         return count, items_checked, ""
 
     # ── Sonarr processing ──
@@ -266,20 +260,12 @@ class ServerRunner:
         server: ServerConfig,
         sonarr_client: SonarrClient | BaseArrClient,
     ) -> tuple[int, int, str]:
-        target_quality = server.target_quality.strip()
-        if not target_quality:
-            logger.warning(
-                "Target quality text is not set — skipping processing",
-                extra={"source_label": sonarr_client.label},
-            )
-            return 0, 0, f"Set target quality text for {server.name}"
-
         count = 0
         episodes_checked = 0
         series_list = sonarr_client.get_items()
         logger.info(
-            "Evaluating %d series (target quality: '%s')",
-            len(series_list), target_quality,
+            "Evaluating %d series",
+            len(series_list),
             extra={"source_label": sonarr_client.label},
         )
         for item in series_list:
@@ -291,7 +277,7 @@ class ServerRunner:
             series_year = item.get("year", "")
             series_slug = item.get("titleSlug", "")
             series_url = f"{sonarr_client.base_url}/series/{series_slug}" if series_slug else ""
-            profile_id = item.get(sonarr_client.profile_key)
+
             episodes = sonarr_client.get_episodes(series_id)
             episode_files = sonarr_client.get_episode_files(series_id)
             monitored_eps = sum(1 for ep in episodes if ep.get("monitored"))
@@ -316,19 +302,20 @@ class ServerRunner:
                 if not episode_file:
                     continue
                 episodes_checked += 1
-                quality_name = _sonarr_episode_quality_name(episode_file)
-                if not _quality_text_matches(quality_name, target_quality):
+                # Use Sonarr's own cutoff calculation
+                if episode_file.get("qualityCutoffNotMet", True):
                     continue
 
+                quality_name = _file_quality_name(episode_file)
                 ep_title = episode.get("title", "")
                 season = episode.get("seasonNumber", "?")
                 ep_num = episode.get("episodeNumber", "?")
                 logger.info(
-                    "Unmonitoring '%s' S%02dE%02d '%s' — file quality '%s' matches target '%s'",
+                    "Unmonitoring '%s' S%02dE%02d '%s' — quality '%s' meets cutoff",
                     series_title,
                     season if isinstance(season, int) else 0,
                     ep_num if isinstance(ep_num, int) else 0,
-                    ep_title, quality_name, target_quality,
+                    ep_title, quality_name,
                     extra={"source_label": sonarr_client.label, "link_url": series_url},
                 )
                 sonarr_client.unmonitor_episode(episode, series_title=series_title, series_slug=series_slug)
@@ -341,7 +328,102 @@ class ServerRunner:
                     link_url=series_url,
                 )
                 count += 1
+
+            # ── Cascade: unmonitor seasons ──
+            if server.unmonitor_season and isinstance(sonarr_client, SonarrClient):
+                self._cascade_unmonitor_seasons(
+                    server, sonarr_client, item, episodes, series_url,
+                )
+
+            # ── Cascade: unmonitor series ──
+            if server.unmonitor_series and isinstance(sonarr_client, SonarrClient):
+                self._cascade_unmonitor_series(
+                    server, sonarr_client, item, episodes, series_url,
+                )
+
         return count, episodes_checked, ""
+
+    # ── Cascade helpers ──
+
+    def _cascade_unmonitor_seasons(
+        self,
+        server: ServerConfig,
+        sonarr_client: SonarrClient,
+        series: dict[str, object],
+        episodes: list[dict[str, object]],
+        series_url: str,
+    ) -> None:
+        """Unmonitor any season where every episode is already unmonitored."""
+        series_title = series.get("title", "Unknown")
+        seasons = series.get("seasons")
+        if not isinstance(seasons, list):
+            return
+
+        # Build a map: season_number -> list of episodes
+        eps_by_season: dict[int, list[dict[str, object]]] = {}
+        for ep in episodes:
+            sn = ep.get("seasonNumber")
+            if isinstance(sn, int):
+                eps_by_season.setdefault(sn, []).append(ep)
+
+        for season in seasons:
+            sn = season.get("seasonNumber")
+            if not isinstance(sn, int) or not season.get("monitored", False):
+                continue
+            season_eps = eps_by_season.get(sn, [])
+            if not season_eps:
+                continue
+            if all(not ep.get("monitored", False) for ep in season_eps):
+                logger.info(
+                    "Unmonitoring '%s' Season %d — all episodes unmonitored",
+                    series_title, sn,
+                    extra={"source_label": sonarr_client.label, "link_url": series_url},
+                )
+                sonarr_client.unmonitor_season(series, sn)
+                self.change_log_store.append({
+                    "service": server.name,
+                    "series_title": str(series_title),
+                    "item_id": series.get("id"),
+                    "title": f"Season {sn}",
+                    "quality": "",
+                    "action": "Unmonitored season",
+                    "link_url": series_url,
+                })
+
+    def _cascade_unmonitor_series(
+        self,
+        server: ServerConfig,
+        sonarr_client: SonarrClient,
+        series: dict[str, object],
+        episodes: list[dict[str, object]],
+        series_url: str,
+    ) -> None:
+        """Unmonitor a series if ended and every episode is unmonitored."""
+        if not series.get("monitored", False):
+            return
+        if str(series.get("status", "")).lower() != "ended":
+            return
+        if not episodes:
+            return
+        if any(ep.get("monitored", False) for ep in episodes):
+            return
+
+        series_title = series.get("title", "Unknown")
+        logger.info(
+            "Unmonitoring series '%s' — ended with all episodes unmonitored",
+            series_title,
+            extra={"source_label": sonarr_client.label, "link_url": series_url},
+        )
+        sonarr_client.unmonitor_series(series)
+        self.change_log_store.append({
+            "service": server.name,
+            "series_title": str(series_title),
+            "item_id": series.get("id"),
+            "title": str(series_title),
+            "quality": "",
+            "action": "Unmonitored series",
+            "link_url": series_url,
+        })
 
 
 # ─────────────────────────────────────────────────────────
@@ -493,19 +575,11 @@ class ArrPoller:
 # Shared helpers (module-level, used by ServerRunner)
 # ─────────────────────────────────────────────────────────
 
-def _quality_text_matches(quality_name: str, target_quality: str) -> bool:
-    current = quality_name.strip().casefold()
-    target = target_quality.strip().casefold()
-    if not current or not target:
-        return False
-    return target in current
-
-
-def _radarr_quality_name(item: dict[str, object]) -> str:
-    movie_file = item.get("movieFile")
-    if not isinstance(movie_file, dict):
+def _file_quality_name(file_obj: dict[str, object] | object) -> str:
+    """Extract the quality name string from a movie file or episode file object."""
+    if not isinstance(file_obj, dict):
         return ""
-    quality = movie_file.get("quality")
+    quality = file_obj.get("quality")
     if not isinstance(quality, dict):
         return ""
     quality_detail = quality.get("quality")
@@ -513,17 +587,6 @@ def _radarr_quality_name(item: dict[str, object]) -> str:
         return ""
     name = quality_detail.get("name")
     return str(name).strip() if isinstance(name, str) else ""
-
-
-def _sonarr_episode_quality_name(episode_file: dict[str, object]) -> str:
-    quality = episode_file.get("quality")
-    if not isinstance(quality, dict):
-        return ""
-    quality_detail = quality.get("quality")
-    if not isinstance(quality_detail, dict):
-        return ""
-    name = quality_detail.get("name")
-    return name.strip() if isinstance(name, str) else ""
 
 
 def _log_sonarr_episode_change(

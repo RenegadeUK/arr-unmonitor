@@ -74,7 +74,10 @@ class BaseArrClient:
         payload = response.json()
         profiles: list[Profile] = []
         for item in payload:
-            profiles.append(Profile(id=int(item["id"]), name=str(item["name"])))
+            profiles.append(Profile(
+                id=int(item["id"]),
+                name=str(item["name"]),
+            ))
         self.logger.info("Loaded %d quality profiles: %s", len(profiles),
                          ", ".join(p.name for p in profiles))
         return profiles
@@ -140,3 +143,39 @@ class SonarrClient(BaseArrClient):
             extra={"link_url": link_url},
         )
         self._request("PUT", f"episode/{episode_id}", json=updated)
+
+    def unmonitor_season(
+        self, series: dict[str, Any], season_number: int,
+    ) -> None:
+        """Set monitored=False on a specific season within a series."""
+        updated = dict(series)
+        seasons = updated.get("seasons", [])
+        for s in seasons:
+            if s.get("seasonNumber") == season_number:
+                s["monitored"] = False
+                break
+        series_id = updated.get("id")
+        series_title = updated.get("title", f"ID {series_id}")
+        slug = updated.get("titleSlug", "")
+        link_url = f"{self.base_url}/series/{slug}" if slug else ""
+        self.logger.info(
+            "Unmonitoring '%s' Season %d (id=%s)",
+            series_title, season_number, series_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"series/{series_id}", json=updated)
+
+    def unmonitor_series(self, series: dict[str, Any]) -> None:
+        """Set monitored=False on an entire series."""
+        updated = dict(series)
+        updated["monitored"] = False
+        series_id = updated.get("id")
+        series_title = updated.get("title", f"ID {series_id}")
+        slug = updated.get("titleSlug", "")
+        link_url = f"{self.base_url}/series/{slug}" if slug else ""
+        self.logger.info(
+            "Unmonitoring series '%s' (id=%s)",
+            series_title, series_id,
+            extra={"link_url": link_url},
+        )
+        self._request("PUT", f"series/{series_id}", json=updated)

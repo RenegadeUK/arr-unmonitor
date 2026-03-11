@@ -118,10 +118,8 @@ def create_app() -> Flask:
                 "url": s.url,
                 "api_key": s.api_key[:4] + "***" if len(s.api_key) > 4 else "***",
                 "api_key_full": s.api_key,
-                "target_quality": s.target_quality,
-                "profile_name": s.profile_name,
-                "stop_mode": s.stop_mode,
-                "profile_id": s.profile_id,
+                "unmonitor_season": s.unmonitor_season,
+                "unmonitor_series": s.unmonitor_series,
                 "enabled": s.enabled,
                 "poll_interval_seconds": s.poll_interval_seconds,
                 "runner_active": runner is not None and runner.is_alive() if runner else False,
@@ -152,9 +150,8 @@ def create_app() -> Flask:
             type=server_type,
             url=str(data.get("url", "")).strip(),
             api_key=str(data.get("api_key", "")).strip(),
-            target_quality=str(data.get("target_quality", "")).strip(),
-            profile_name=str(data.get("profile_name", "")).strip(),
-            stop_mode=str(data.get("stop_mode", "cutoff")).strip() or "cutoff",
+            unmonitor_season=bool(data.get("unmonitor_season", False)),
+            unmonitor_series=bool(data.get("unmonitor_series", False)),
             enabled=bool(data.get("enabled", True)),
             poll_interval_seconds=max(int(raw_interval), 30) if raw_interval else None,
         )
@@ -185,12 +182,9 @@ def create_app() -> Flask:
         server.type = new_type
         server.url = str(data.get("url", server.url)).strip()
         server.api_key = str(data.get("api_key", server.api_key)).strip()
-        server.target_quality = str(data.get("target_quality", server.target_quality)).strip()
-        server.profile_name = str(data.get("profile_name", server.profile_name)).strip()
-        server.stop_mode = str(data.get("stop_mode", server.stop_mode)).strip() or "cutoff"
+        server.unmonitor_season = bool(data.get("unmonitor_season", server.unmonitor_season))
+        server.unmonitor_series = bool(data.get("unmonitor_series", server.unmonitor_series))
         server.enabled = bool(data.get("enabled", server.enabled))
-        # Reset profile_id when profile_name changes
-        server.profile_id = None
         # Per-server poll interval (null = use global)
         raw_interval = data.get("poll_interval_seconds")
         if raw_interval is not None:

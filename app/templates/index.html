@@ -300,20 +300,6 @@
               <input id="sf-api-key" type="password" />
             </div>
             <div>
-              <label for="sf-target-quality">Target Quality</label>
-              <input id="sf-target-quality" type="text" placeholder="e.g. Remux-2160p" />
-            </div>
-            <div>
-              <label for="sf-profile-name">Profile Filter (blank = all)</label>
-              <input id="sf-profile-name" type="text" />
-            </div>
-            <div>
-              <label for="sf-stop-mode">Stop Mode</label>
-              <select id="sf-stop-mode">
-                <option value="cutoff">Cutoff</option>
-              </select>
-            </div>
-            <div>
               <label for="sf-enabled">Enabled</label>
               <select id="sf-enabled">
                 <option value="true">Yes</option>
@@ -323,6 +309,13 @@
             <div>
               <label for="sf-poll-interval">Poll Interval (seconds)</label>
               <input id="sf-poll-interval" type="number" min="30" step="1" placeholder="Use global default" />
+            </div>
+            <div id="sf-sonarr-options" class="full-width" style="display:none;">
+              <label style="margin-bottom:0.5rem;">Sonarr Cascade Options</label>
+              <div style="display:flex;gap:1.5rem;align-items:center;">
+                <label style="font-weight:normal;cursor:pointer;"><input type="checkbox" id="sf-unmonitor-season" style="width:auto;margin-right:0.4rem;accent-color:#16a34a;" /> Unmonitor seasons</label>
+                <label style="font-weight:normal;cursor:pointer;"><input type="checkbox" id="sf-unmonitor-series" style="width:auto;margin-right:0.4rem;accent-color:#16a34a;" /> Unmonitor ended series</label>
+              </div>
             </div>
           </div>
           <div class="actions" style="margin-top:1rem;">
@@ -571,7 +564,6 @@
               <span class="badge ${bc}">${bt}</span>
             </div>
             <div class="dash-card-stat"><span>URL</span><span class="stat-value" style="font-size:0.85rem;color:#9ca3af;">${escapeHtml(s.url || 'Not set')}</span></div>
-            <div class="dash-card-stat"><span>Target Quality</span><span class="stat-value">${escapeHtml(s.target_quality || 'Not set')}</span></div>
             <div class="dash-card-stat"><span>Poll Interval</span><span class="stat-value">${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global'}</span></div>
             <div class="dash-card-stat"><span>Next Run</span><span class="stat-value" id="dash-next-${escapeHtml(s.name)}">--</span></div>
             <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">--</span></div>
@@ -646,10 +638,9 @@
             <div class="server-card-details">
               <div><div class="detail-label">URL</div><div>${escapeHtml(s.url || 'Not set')}</div></div>
               <div><div class="detail-label">API Key</div><div>${escapeHtml(s.api_key || '***')}</div></div>
-              <div><div class="detail-label">Target Quality</div><div>${escapeHtml(s.target_quality || 'Not set')}</div></div>
-              <div><div class="detail-label">Profile Filter</div><div>${escapeHtml(s.profile_name || 'All profiles')}</div></div>
-              <div><div class="detail-label">Stop Mode</div><div>${escapeHtml(s.stop_mode || 'cutoff')}</div></div>
               <div><div class="detail-label">Poll Interval</div><div>${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global default'}</div></div>
+              ${s.type === 'sonarr' ? `<div><div class="detail-label">Unmonitor Seasons</div><div>${s.unmonitor_season ? 'Yes' : 'No'}</div></div>
+              <div><div class="detail-label">Unmonitor Series</div><div>${s.unmonitor_series ? 'Yes' : 'No'}</div></div>` : ''}
               <div><div class="detail-label">Status</div><div>${escapeHtml(status.message || 'Not checked yet')}</div></div>
             </div>
             <div class="server-card-actions">
@@ -686,14 +677,20 @@
         document.getElementById('sf-type').value = 'radarr';
         document.getElementById('sf-url').value = '';
         document.getElementById('sf-api-key').value = '';
-        document.getElementById('sf-target-quality').value = '';
-        document.getElementById('sf-profile-name').value = '';
-        document.getElementById('sf-stop-mode').value = 'cutoff';
         document.getElementById('sf-enabled').value = 'true';
         document.getElementById('sf-poll-interval').value = '';
+        document.getElementById('sf-unmonitor-season').checked = false;
+        document.getElementById('sf-unmonitor-series').checked = false;
+        toggleSonarrOptions();
         document.getElementById('server-form-section').style.display = '';
         document.getElementById('sf-name').focus();
       }
+
+      function toggleSonarrOptions() {
+        const isSonarr = document.getElementById('sf-type').value === 'sonarr';
+        document.getElementById('sf-sonarr-options').style.display = isSonarr ? '' : 'none';
+      }
+      document.getElementById('sf-type').addEventListener('change', toggleSonarrOptions);
 
       function editServer(name) {
         const s = cachedServers.find(srv => srv.name === name);
@@ -705,10 +702,10 @@
         document.getElementById('sf-type').value = s.type;
         document.getElementById('sf-url').value = s.url || '';
         document.getElementById('sf-api-key').value = s.api_key_full || '';
-        document.getElementById('sf-target-quality').value = s.target_quality || '';
-        document.getElementById('sf-profile-name').value = s.profile_name || '';
-        document.getElementById('sf-stop-mode').value = s.stop_mode || 'cutoff';
         document.getElementById('sf-enabled').value = s.enabled ? 'true' : 'false';
+        document.getElementById('sf-unmonitor-season').checked = !!s.unmonitor_season;
+        document.getElementById('sf-unmonitor-series').checked = !!s.unmonitor_series;
+        toggleSonarrOptions();
         document.getElementById('sf-poll-interval').value = s.poll_interval_seconds != null ? s.poll_interval_seconds : '';
         document.getElementById('server-form-section').style.display = '';
         document.getElementById('sf-name').focus();
@@ -725,11 +722,10 @@
           type: document.getElementById('sf-type').value,
           url: document.getElementById('sf-url').value.trim(),
           api_key: document.getElementById('sf-api-key').value.trim(),
-          target_quality: document.getElementById('sf-target-quality').value.trim(),
-          profile_name: document.getElementById('sf-profile-name').value.trim(),
-          stop_mode: document.getElementById('sf-stop-mode').value,
           enabled: document.getElementById('sf-enabled').value === 'true',
           poll_interval_seconds: rawInterval ? parseInt(rawInterval, 10) : null,
+          unmonitor_season: document.getElementById('sf-unmonitor-season').checked,
+          unmonitor_series: document.getElementById('sf-unmonitor-series').checked,
         };
         if (!payload.name) { showToast('Server name is required', false); return; }
         try {

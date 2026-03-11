@@ -20,12 +20,11 @@ class ServerConfig:
     type: str = "radarr"  # "radarr" or "sonarr"
     url: str = ""
     api_key: str = ""
-    target_quality: str = ""
-    profile_name: str = ""
-    stop_mode: str = "cutoff"
-    profile_id: int | None = None
     enabled: bool = True
     poll_interval_seconds: int | None = None  # None = use global default
+    # Sonarr-only cascade toggles
+    unmonitor_season: bool = False
+    unmonitor_series: bool = False
 
 
 @dataclass
@@ -84,12 +83,10 @@ class SettingsStore:
                     type=str(srv.get("type", "radarr")).strip().lower(),
                     url=str(srv.get("url", "")).strip(),
                     api_key=str(srv.get("api_key", "")).strip(),
-                    target_quality=str(srv.get("target_quality", "")).strip(),
-                    profile_name=str(srv.get("profile_name", "")).strip(),
-                    stop_mode=str(srv.get("stop_mode", "cutoff")).strip() or "cutoff",
-                    profile_id=srv.get("profile_id"),
                     enabled=bool(srv.get("enabled", True)),
                     poll_interval_seconds=int(raw_interval) if raw_interval is not None else None,
+                    unmonitor_season=bool(srv.get("unmonitor_season", False)),
+                    unmonitor_series=bool(srv.get("unmonitor_series", False)),
                 )
             )
         return AppSettings(
@@ -111,10 +108,6 @@ class SettingsStore:
                     type="radarr",
                     url=radarr_url,
                     api_key=radarr_key,
-                    target_quality=str(raw.get("radarr_target_quality", "")).strip(),
-                    profile_name=str(raw.get("radarr_profile_name", "")).strip(),
-                    stop_mode=str(raw.get("radarr_stop_mode", "cutoff")).strip() or "cutoff",
-                    profile_id=raw.get("radarr_profile_id"),
                     enabled=True,
                 )
             )
@@ -127,10 +120,6 @@ class SettingsStore:
                     type="sonarr",
                     url=sonarr_url,
                     api_key=sonarr_key,
-                    target_quality=str(raw.get("sonarr_target_quality", "")).strip(),
-                    profile_name=str(raw.get("sonarr_profile_name", "")).strip(),
-                    stop_mode=str(raw.get("sonarr_stop_mode", "cutoff")).strip() or "cutoff",
-                    profile_id=raw.get("sonarr_profile_id"),
                     enabled=True,
                 )
             )
