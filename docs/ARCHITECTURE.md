@@ -80,18 +80,27 @@ The application entry point. `create_app()` is a Flask factory function that:
 
 ### `app/poller.py` — Background Polling Engine
 
-- **`PollStats`** — Tracks last run timestamp, errors, unmonitor counts, last 25 runs, and per-service connectivity status.
-- **`ArrPoller`** — Daemon thread that:
-  1. Loads current settings.
-  2. Checks connectivity to both services (`_check_service()`).
-  3. Processes Radarr movies (`_process_radarr()`) — unmonitors movies whose file quality name contains the target quality text.
-  4. Processes Sonarr episodes (`_process_sonarr()`) — iterates every series → every episode → checks episode file quality → unmonitors matching episodes individually (series stays monitored).
-  5. Records the run result and logs each unmonitor action.
-  6. Sleeps for `poll_interval_seconds` before repeating.
+- **`PollStats`** — Aggregated stats across all server runners: last run timestamp, errors, unmonitor counts, last 25 runs, and per-service connectivity status.
+- **`ServerRunner`** — Independent polling thread per configured server. Each runner:
+  1. Owns its own `threading.Thread`, `threading.Lock` (run guard), and `threading.Event` (stop signal).
+  2. Tracks per-server stats: `last_run`, `last_error`, `last_unmonitored_count`, `recent_runs`, `service_status`.
+  3. Loads settings each cycle to determine its own interval (`server.poll_interval_seconds` or global default, minimum 30s).
+  4. Checks connectivity (`_check_service()`).
+  5. Processes Radarr movies (`_process_radarr()`) or Sonarr episodes (`_process_sonarr()`).
+  6. Records the run result and logs each unmonitor action.
+  7. Sleeps for its configured interval before repeating.
+- **`ArrPoller`** — Coordinator that manages a `dict[str, ServerRunner]` keyed by server name:
+  - `start()` / `stop()` — Start or stop all runners.
+  - `sync_runners()` — Called when settings change to add/remove/start/stop runners as needed.
+  - `run_all()` — Triggers an immediate poll on every active runner (for "Run Now").
+  - `run_server(name)` — Triggers an immediate poll on a specific runner.
+  - `status_payload()` — Aggregates stats from all runners for the dashboard.
+
+**Failure isolation:** Each server polls independently. A slow or unreachable server does not block other servers.
+
+**Per-server intervals:** Each server can optionally define its own `poll_interval_seconds`. If not set, the global default is used.
 
 **Quality matching** is case-insensitive substring matching (`target in current`).
-
-**Thread safety:** Uses `threading.Lock` to prevent concurrent poll runs and `threading.Event` for graceful shutdown.
 
 ### `app/change_log.py` — Persistent Change Log
 
@@ -121,25 +130,33 @@ Contains `favicon.svg` only.
 ### Poll Cycle
 
 ```
-ArrPoller._loop()
-  └─► run_once()
-        ├─► SettingsStore.load()          # Read current config
-        ├─► _check_service("radarr")      # GET /api/v3/qualityprofile
-        ├─► _check_service("sonarr")      # GET /api/v3/qualityprofile
-        ├─► _process_radarr()
-        │     ├─► RadarrClient.get_items() # GET /api/v3/movie
-        │     └─► For each matching movie:
-        │           ├─► RadarrClient.unmonitor_item()  # PUT /api/v3/movie/{id}
-        │           └─► ChangeLogStore.append()
-        ├─► _process_sonarr()
-        │     ├─► SonarrClient.get_items()            # GET /api/v3/series
-        │     └─► For each series:
-        │           ├─► SonarrClient.get_episodes()    # GET /api/v3/episode
-        │           ├─► SonarrClient.get_episode_files()# GET /api/v3/episodefile
-        │           └─► For each matching episode:
-        │                 ├─► SonarrClient.unmonitor_episode() # PUT /api/v3/episode/{id}
-        │                 └─► ChangeLogStore.append()
-        └─► _record_run()                 # Update PollStats
+ArrPoller (coordinator)
+  ├─► sync_runners()                    # Reconcile runners with settings
+  │
+  ├─► ServerRunner("Radarr")            # Independent thread
+  │     └─► _loop()
+  │           ├─► SettingsStore.load()   # Read config + own interval
+  │           ├─► _check_service()       # GET /api/v3/qualityprofile
+  │           ├─► _process_radarr()
+  │           │     ├─► RadarrClient.get_items()           # GET /api/v3/movie
+  │           │     └─► For each matching movie:
+  │           │           ├─► RadarrClient.unmonitor_item() # PUT /api/v3/movie/{id}
+  │           │           └─► ChangeLogStore.append()
+  │           └─► sleep(server interval or global interval)
+  │
+  └─► ServerRunner("Sonarr")            # Independent thread
+        └─► _loop()
+              ├─► SettingsStore.load()
+              ├─► _check_service()
+              ├─► _process_sonarr()
+              │     ├─► SonarrClient.get_items()            # GET /api/v3/series
+              │     └─► For each series:
+              │           ├─► SonarrClient.get_episodes()    # GET /api/v3/episode
+              │           ├─► SonarrClient.get_episode_files()# GET /api/v3/episodefile
+              │           └─► For each matching episode:
+              │                 ├─► SonarrClient.unmonitor_episode() # PUT /api/v3/episode/{id}
+              │                 └─► ChangeLogStore.append()
+              └─► sleep(server interval or global interval)
 ```
 
 ### Settings Save Flow

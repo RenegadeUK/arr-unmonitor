@@ -52,10 +52,26 @@
       .badge-bad { background: #7f1d1d; color: #fecaca; }
       .badge-unknown { background: #3f3f46; color: #d4d4d8; }
       .badge-disabled { background: #374151; color: #6b7280; }
-      table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-      th, td { border: 1px solid #3a404a; padding: 0.45rem; text-align: left; }
-      th { background: #262b33; }
+      table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 0.75rem; background: #2b313a; border: 1px solid #3a404a; border-radius: 10px; overflow: hidden; }
+      th, td { border: none; border-bottom: 1px solid #31363f; padding: 0.55rem 0.75rem; text-align: left; font-size: 0.9rem; }
+      th { background: #262b33; color: #9ca3af; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+      tbody tr:last-child td { border-bottom: none; }
+      tbody tr:hover { background: #31363f; }
+      td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      td.nowrap { white-space: nowrap; }
       a { color: #93c5fd; }
+
+      /* ── Status indicators ── */
+      .run-ok  { color: #22c55e; }
+      .run-err { color: #ef4444; }
+      .run-err-row     { background: #2a1c1c; }
+      .run-err-row:hover { background: #331f1f; }
+      .run-err-detail td { border-bottom: 1px solid #3a2020; padding-top: 0; font-size: 0.84rem; }
+
+      /* ── Change log tweaks ── */
+      .cl-title-series { color: #9ca3af; font-size: 0.85rem; }
+      .cl-action { display: inline-block; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.76rem; font-weight: 600; background: #374151; color: #d1d5db; }
+      .cl-quality { color: #a5b4fc; font-size: 0.88rem; }
 
       /* ── Type badges ── */
       .type-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.78rem; font-weight: 600; text-transform: capitalize; }
@@ -195,20 +211,32 @@
         <table>
           <thead>
             <tr>
-              <th>Started</th>
-              <th>Duration (s)</th>
-              <th>Unmonitored</th>
-              <th>Error</th>
+              <th style="width:2rem;text-align:center;"></th>
+              <th>Server</th>
+              <th>Type</th>
+              <th style="text-align:right;">Checked</th>
+              <th style="text-align:right;">Unmonitored</th>
+              <th style="text-align:right;">Duration</th>
+              <th>Time</th>
             </tr>
           </thead>
           <tbody>
             {% for run in recent_runs %}
-            <tr>
-              <td>{{ run.started_at_display }}</td>
-              <td>{{ run.duration_seconds }}</td>
-              <td>{{ run.total_unmonitored | default(0) }}</td>
-              <td>{% if run.error %}<span class="error">{{ run.error }}</span>{% else %}None{% endif %}</td>
+            <tr class="{% if run.error %}run-err-row{% endif %}">
+              <td style="text-align:center;">{% if run.error %}<span class="run-err" title="{{ run.error }}">&#x2716;</span>{% else %}<span class="run-ok">&#x2714;</span>{% endif %}</td>
+              <td>{{ run.server }}</td>
+              <td>{% if run.server_type %}<span class="type-badge type-{{ run.server_type }}">{{ run.server_type }}</span>{% else %}&mdash;{% endif %}</td>
+              <td class="num">{{ run.items_checked | default(0) }}</td>
+              <td class="num">{% if run.unmonitored %}<strong>{{ run.unmonitored }}</strong>{% else %}0{% endif %}</td>
+              <td class="num">{{ run.duration_seconds }}s</td>
+              <td class="nowrap">{{ run.started_at_display }}</td>
             </tr>
+            {% if run.error %}
+            <tr class="run-err-row run-err-detail">
+              <td></td>
+              <td colspan="6"><span class="error">{{ run.error }}</span></td>
+            </tr>
+            {% endif %}
             {% endfor %}
           </tbody>
         </table>
@@ -223,7 +251,7 @@
               <th>When</th>
               <th>Service</th>
               <th>Title</th>
-              <th>Quality</th>
+              <th style="text-align:right;">Quality</th>
               <th>Action</th>
             </tr>
           </thead>
@@ -291,6 +319,10 @@
                 <option value="true">Yes</option>
                 <option value="false">No</option>
               </select>
+            </div>
+            <div>
+              <label for="sf-poll-interval">Poll Interval (seconds)</label>
+              <input id="sf-poll-interval" type="number" min="30" step="1" placeholder="Use global default" />
             </div>
           </div>
           <div class="actions" style="margin-top:1rem;">
@@ -540,8 +572,13 @@
             </div>
             <div class="dash-card-stat"><span>URL</span><span class="stat-value" style="font-size:0.85rem;color:#9ca3af;">${escapeHtml(s.url || 'Not set')}</span></div>
             <div class="dash-card-stat"><span>Target Quality</span><span class="stat-value">${escapeHtml(s.target_quality || 'Not set')}</span></div>
+            <div class="dash-card-stat"><span>Poll Interval</span><span class="stat-value">${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global'}</span></div>
+            <div class="dash-card-stat"><span>Next Run</span><span class="stat-value" id="dash-next-${escapeHtml(s.name)}">--</span></div>
             <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">--</span></div>
-            <div style="margin-top:0.5rem;"><a href="#settings" onclick="switchTab('settings');" style="font-size:0.85rem;">Edit in Settings</a></div>
+            <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
+              <form method="post" action="/run-now/${encodeURIComponent(s.name)}" style="margin:0;"><button type="submit" style="font-size:0.82rem;">Run Now</button></form>
+              <a href="#settings" onclick="switchTab('settings');" style="font-size:0.85rem;">Edit in Settings</a>
+            </div>
           </div>`;
         }
         ct.innerHTML = html;
@@ -563,11 +600,16 @@
           });
           if (merged.length > 0) renderDashServerCards(merged);
 
-          // Update per-server unmonitored count
+          // Update per-server unmonitored count and next run
           const unmon = data.last_unmonitored || {};
           for (const [name, count] of Object.entries(unmon)) {
             const el = document.getElementById('dash-unmon-' + name);
             if (el) el.textContent = String(count);
+          }
+          const statusServersForCountdown = data.servers || [];
+          for (const ss of statusServersForCountdown) {
+            const nextEl = document.getElementById('dash-next-' + ss.name);
+            if (nextEl) nextEl.textContent = ss.seconds_until_next_run != null ? formatCountdown(ss.seconds_until_next_run) : '--';
           }
         } catch (_) {
           applyHealthBadge('error');
@@ -607,6 +649,7 @@
               <div><div class="detail-label">Target Quality</div><div>${escapeHtml(s.target_quality || 'Not set')}</div></div>
               <div><div class="detail-label">Profile Filter</div><div>${escapeHtml(s.profile_name || 'All profiles')}</div></div>
               <div><div class="detail-label">Stop Mode</div><div>${escapeHtml(s.stop_mode || 'cutoff')}</div></div>
+              <div><div class="detail-label">Poll Interval</div><div>${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global default'}</div></div>
               <div><div class="detail-label">Status</div><div>${escapeHtml(status.message || 'Not checked yet')}</div></div>
             </div>
             <div class="server-card-actions">
@@ -647,6 +690,7 @@
         document.getElementById('sf-profile-name').value = '';
         document.getElementById('sf-stop-mode').value = 'cutoff';
         document.getElementById('sf-enabled').value = 'true';
+        document.getElementById('sf-poll-interval').value = '';
         document.getElementById('server-form-section').style.display = '';
         document.getElementById('sf-name').focus();
       }
@@ -665,6 +709,7 @@
         document.getElementById('sf-profile-name').value = s.profile_name || '';
         document.getElementById('sf-stop-mode').value = s.stop_mode || 'cutoff';
         document.getElementById('sf-enabled').value = s.enabled ? 'true' : 'false';
+        document.getElementById('sf-poll-interval').value = s.poll_interval_seconds != null ? s.poll_interval_seconds : '';
         document.getElementById('server-form-section').style.display = '';
         document.getElementById('sf-name').focus();
       }
@@ -674,6 +719,7 @@
       }
 
       async function submitServerForm() {
+        const rawInterval = document.getElementById('sf-poll-interval').value.trim();
         const payload = {
           name: document.getElementById('sf-name').value.trim(),
           type: document.getElementById('sf-type').value,
@@ -683,6 +729,7 @@
           profile_name: document.getElementById('sf-profile-name').value.trim(),
           stop_mode: document.getElementById('sf-stop-mode').value,
           enabled: document.getElementById('sf-enabled').value === 'true',
+          poll_interval_seconds: rawInterval ? parseInt(rawInterval, 10) : null,
         };
         if (!payload.name) { showToast('Server name is required', false); return; }
         try {
@@ -778,16 +825,16 @@
             const quality = c.quality || '\u2014';
             const action = c.action || '';
             let titleHtml = '';
-            if (seriesTitle) titleHtml += `<span style="color:#9ca3af;">${escapeHtml(seriesTitle)}</span> \u2014 `;
+            if (seriesTitle) titleHtml += `<span class="cl-title-series">${escapeHtml(seriesTitle)} \u2014</span> `;
             titleHtml += linkUrl
               ? `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>`
               : escapeHtml(title);
             html += `<tr>
-              <td>${escapeHtml(ts)}</td>
+              <td class="nowrap">${escapeHtml(ts)}</td>
               <td><span class="src-badge ${sourceBadgeClass(svc)}">${escapeHtml(svc)}</span></td>
               <td>${titleHtml}</td>
-              <td>${escapeHtml(quality)}</td>
-              <td>${escapeHtml(action)}</td>
+              <td class="num"><span class="cl-quality">${escapeHtml(quality)}</span></td>
+              <td><span class="cl-action">${escapeHtml(action)}</span></td>
             </tr>`;
           }
           tbody.innerHTML = html;

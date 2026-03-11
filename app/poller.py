@@ -12,6 +12,8 @@ from .config import AppSettings, ServerConfig, SettingsStore
 
 logger = logging.getLogger(__name__)
 
+MIN_POLL_INTERVAL = 30
+
 
 @dataclass
 class PollStats:
@@ -29,177 +31,209 @@ def client_from_server(server: ServerConfig) -> BaseArrClient:
     return RadarrClient(server.url, server.api_key, label=server.name)
 
 
-class ArrPoller:
+# ─────────────────────────────────────────────────────────
+# ServerRunner — independent polling thread per server
+# ─────────────────────────────────────────────────────────
+
+class ServerRunner:
+    """Polls a single *arr server on its own thread and schedule."""
+
     def __init__(
         self,
+        server_name: str,
         settings_store: SettingsStore,
         change_log_store: ChangeLogStore,
     ) -> None:
+        self.server_name = server_name
         self.settings_store = settings_store
         self.change_log_store = change_log_store
-        self.stats = PollStats()
+
+        # Per-runner stats
+        self.last_run: float | None = None
+        self.last_error: str = ""
+        self.last_unmonitored_count: int = 0
+        self.recent_runs: deque[dict[str, object]] = deque(maxlen=25)
+        self.service_status: dict[str, object] = {}
+
         self._run_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    # ── Lifecycle ──
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name=f"runner-{self.server_name}",
+        )
         self._thread.start()
+        logger.info("Runner started for '%s'", self.server_name)
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
-
-    def run_once(self) -> None:
-        if not self._run_lock.acquire(blocking=False):
-            logger.debug("Poll skipped — already running")
-            return
-
-        started_at = time.time()
-        settings = self.settings_store.load()
-        unmonitored_counts: dict[str, int] = {}
-        service_errors: list[str] = []
-
-        logger.info(
-            "Poll cycle started — interval %ds, %d server(s)",
-            settings.poll_interval_seconds,
-            len(settings.servers),
-        )
-
-        try:
-            if not settings.enabled:
-                logger.info("Polling is disabled — skipping processing")
-                self.stats.last_error = ""
-                self.stats.last_unmonitored = {}
-            else:
-                for server in settings.servers:
-                    if not server.enabled:
-                        logger.info("Server '%s' is disabled — skipping", server.name)
-                        unmonitored_counts[server.name] = 0
-                        continue
-
-                    client = client_from_server(server)
-                    ok, message = self._check_service(server.name, client)
-                    if not ok:
-                        service_errors.append(f"{server.name}: {message}")
-                        unmonitored_counts[server.name] = 0
-                        continue
-
-                    if server.type == "radarr":
-                        count, profile_error = self._process_radarr(server, client)
-                    elif server.type == "sonarr":
-                        count, profile_error = self._process_sonarr(server, client)
-                    else:
-                        logger.warning("Unknown server type '%s' for '%s'", server.type, server.name)
-                        count, profile_error = 0, ""
-
-                    unmonitored_counts[server.name] = count
-                    if profile_error:
-                        service_errors.append(f"{server.name}: {profile_error}")
-
-                self.stats.last_unmonitored = unmonitored_counts
-                self.stats.last_error = " | ".join(service_errors)
-        except ArrClientError as exc:
-            logger.error("Poll cycle failed — %s", exc)
-            self.stats.last_error = str(exc)
-            self.stats.last_unmonitored = {}
-        except Exception as exc:
-            logger.error("Unexpected error during poll: %s", exc, exc_info=True)
-            self.stats.last_error = f"Unexpected error: {exc}"
-            self.stats.last_unmonitored = {}
-        finally:
-            self.stats.last_run = time.time()
-            total_unmonitored = sum(unmonitored_counts.values())
-            self._record_run(started_at, unmonitored_counts, self.stats.last_error)
-            duration = round(self.stats.last_run - started_at, 3)
-            summary_parts = [f"{name}={count}" for name, count in unmonitored_counts.items()]
-            logger.info(
-                "Poll cycle completed in %.3fs — unmonitored: %s (total %d)",
-                duration, ", ".join(summary_parts) if summary_parts else "none", total_unmonitored,
-            )
-            self._run_lock.release()
-
-    def _record_run(
-        self,
-        started_at: float,
-        unmonitored_counts: dict[str, int],
-        error: str,
-    ) -> None:
-        self.stats.recent_runs.appendleft(
-            {
-                "started_at": started_at,
-                "finished_at": self.stats.last_run,
-                "duration_seconds": round((self.stats.last_run or started_at) - started_at, 3),
-                "unmonitored": unmonitored_counts,
-                "total_unmonitored": sum(unmonitored_counts.values()),
-                "error": error,
-            }
-        )
-
-    def status_payload(self) -> dict[str, object]:
-        return {
-            "last_run": self.stats.last_run,
-            "last_error": self.stats.last_error,
-            "last_unmonitored": self.stats.last_unmonitored,
-            "recent_runs": list(self.stats.recent_runs),
-            "recent_changes": self.change_log_store.recent(200),
-            "service_status": self.stats.service_status,
-        }
-
-    def clear_history(self) -> None:
-        self.stats.recent_runs.clear()
+        logger.info("Runner stopped for '%s'", self.server_name)
 
     def is_running(self) -> bool:
         return self._run_lock.locked()
 
-    def is_stopped(self) -> bool:
-        return self._stop.is_set()
+    def is_alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
-    def update_service_status(self, service: str, ok: bool, message: str) -> None:
-        self.stats.service_status[service] = {
-            "ok": ok,
-            "message": message,
-            "checked_at": time.time(),
-        }
+    # ── Main loop ──
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self.run_once()
             settings = self.settings_store.load()
-            interval = max(int(settings.poll_interval_seconds), 30)
+            if settings.enabled:
+                self.run_once()
+            else:
+                logger.debug(
+                    "Global polling disabled — runner '%s' sleeping", self.server_name,
+                )
+            interval = self._effective_interval(settings)
             self._stop.wait(interval)
+
+    def _effective_interval(self, settings: AppSettings) -> int:
+        server = settings.get_server_by_name(self.server_name)
+        if server and server.poll_interval_seconds is not None:
+            return max(int(server.poll_interval_seconds), MIN_POLL_INTERVAL)
+        return max(int(settings.poll_interval_seconds), MIN_POLL_INTERVAL)
+
+    # ── Single poll cycle ──
+
+    def run_once(self) -> None:
+        if not self._run_lock.acquire(blocking=False):
+            logger.debug("Poll skipped for '%s' — already running", self.server_name)
+            return
+
+        started_at = time.time()
+        count = 0
+        items_checked = 0
+        server_type = ""
+        error = ""
+
+        try:
+            settings = self.settings_store.load()
+            server = settings.get_server_by_name(self.server_name)
+            if not server:
+                error = f"Server '{self.server_name}' not found in settings"
+                logger.warning(error)
+                return
+            if not server.enabled:
+                logger.info("Server '%s' is disabled — skipping", self.server_name)
+                return
+
+            server_type = server.type
+            client = client_from_server(server)
+            ok, message = self._check_service(client)
+            if not ok:
+                error = message
+                return
+
+            if server.type == "radarr":
+                count, items_checked, profile_error = self._process_radarr(server, client)
+            elif server.type == "sonarr":
+                count, items_checked, profile_error = self._process_sonarr(server, client)
+            else:
+                logger.warning("Unknown server type '%s' for '%s'", server.type, server.name)
+                count, items_checked, profile_error = 0, 0, ""
+
+            if profile_error:
+                error = profile_error
+
+        except ArrClientError as exc:
+            error = str(exc)
+            logger.error("Poll failed for '%s' — %s", self.server_name, exc)
+        except Exception as exc:
+            error = f"Unexpected error: {exc}"
+            logger.error(
+                "Unexpected error polling '%s': %s", self.server_name, exc, exc_info=True,
+            )
+        finally:
+            finished_at = time.time()
+            self.last_run = finished_at
+            self.last_error = error
+            self.last_unmonitored_count = count
+            duration = round(finished_at - started_at, 3)
+
+            self.recent_runs.appendleft({
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_seconds": duration,
+                "server": self.server_name,
+                "server_type": server_type,
+                "items_checked": items_checked,
+                "unmonitored": count,
+                "error": error,
+            })
+
+            logger.info(
+                "Poll for '%s' completed in %.3fs — unmonitored: %d%s",
+                self.server_name, duration, count,
+                f" — error: {error}" if error else "",
+            )
+            self._run_lock.release()
+
+    # ── Service check ──
+
+    def _check_service(
+        self, client: RadarrClient | SonarrClient | BaseArrClient,
+    ) -> tuple[bool, str]:
+        try:
+            profiles = client.get_profiles()
+            profile_names = ", ".join(p.name for p in profiles)
+            message = f"Connected ({len(profiles)} profiles: {profile_names})"
+            logger.info(
+                "Health check passed — %s",
+                message,
+                extra={"source_label": client.label},
+            )
+            self.service_status = {"ok": True, "message": message, "checked_at": time.time()}
+            return True, message
+        except ArrClientError as exc:
+            message = str(exc)
+            logger.error(
+                "Health check FAILED — %s",
+                message,
+                extra={"source_label": client.label},
+            )
+            self.service_status = {"ok": False, "message": message, "checked_at": time.time()}
+            return False, message
+
+    # ── Radarr processing ──
 
     def _process_radarr(
         self,
         server: ServerConfig,
         radarr_client: RadarrClient | BaseArrClient,
-    ) -> tuple[int, str]:
+    ) -> tuple[int, int, str]:
         target_quality = server.target_quality.strip()
         if not target_quality:
             logger.warning(
                 "Target quality text is not set — skipping processing",
                 extra={"source_label": radarr_client.label},
             )
-            return 0, f"Set target quality text for {server.name}"
+            return 0, 0, f"Set target quality text for {server.name}"
 
         count = 0
         items = radarr_client.get_items()
+        items_checked = len(items)
         monitored_with_file = sum(
             1 for i in items if i.get("monitored") and i.get("hasFile")
         )
         logger.info(
             "Evaluating %d movies (%d monitored with files, target quality: '%s')",
-            len(items), monitored_with_file, target_quality,
+            items_checked, monitored_with_file, target_quality,
             extra={"source_label": radarr_client.label},
         )
         for item in items:
             profile_id = item.get(radarr_client.profile_key)
-            quality_name = self._radarr_quality_name(item)
-            quality_match = self._quality_text_matches(quality_name, target_quality)
+            quality_name = _radarr_quality_name(item)
+            quality_match = _quality_text_matches(quality_name, target_quality)
 
             if (
                 item.get("monitored", False)
@@ -216,28 +250,32 @@ class ArrPoller:
                     extra={"source_label": radarr_client.label, "link_url": movie_url},
                 )
                 radarr_client.unmonitor_item(item)
-                self._log_change(
+                _log_change(
+                    self.change_log_store,
                     server.name, item,
                     quality_name=quality_name,
                     link_url=movie_url,
                 )
                 count += 1
-        return count, ""
+        return count, items_checked, ""
+
+    # ── Sonarr processing ──
 
     def _process_sonarr(
         self,
         server: ServerConfig,
         sonarr_client: SonarrClient | BaseArrClient,
-    ) -> tuple[int, str]:
+    ) -> tuple[int, int, str]:
         target_quality = server.target_quality.strip()
         if not target_quality:
             logger.warning(
                 "Target quality text is not set — skipping processing",
                 extra={"source_label": sonarr_client.label},
             )
-            return 0, f"Set target quality text for {server.name}"
+            return 0, 0, f"Set target quality text for {server.name}"
 
         count = 0
+        episodes_checked = 0
         series_list = sonarr_client.get_items()
         logger.info(
             "Evaluating %d series (target quality: '%s')",
@@ -277,8 +315,9 @@ class ArrPoller:
                 episode_file = episode_file_by_id.get(episode_file_id)
                 if not episode_file:
                     continue
-                quality_name = self._sonarr_episode_quality_name(episode_file)
-                if not self._quality_text_matches(quality_name, target_quality):
+                episodes_checked += 1
+                quality_name = _sonarr_episode_quality_name(episode_file)
+                if not _quality_text_matches(quality_name, target_quality):
                     continue
 
                 ep_title = episode.get("title", "")
@@ -293,7 +332,8 @@ class ArrPoller:
                     extra={"source_label": sonarr_client.label, "link_url": series_url},
                 )
                 sonarr_client.unmonitor_episode(episode, series_title=series_title, series_slug=series_slug)
-                self._log_sonarr_episode_change(
+                _log_sonarr_episode_change(
+                    self.change_log_store,
                     episode, series_id,
                     server_name=server.name,
                     series_title=series_title,
@@ -301,108 +341,240 @@ class ArrPoller:
                     link_url=series_url,
                 )
                 count += 1
-        return count, ""
+        return count, episodes_checked, ""
 
-    def _check_service(self, service: str, client: RadarrClient | SonarrClient | BaseArrClient) -> tuple[bool, str]:
-        try:
-            profiles = client.get_profiles()
-            profile_names = ", ".join(p.name for p in profiles)
-            message = f"Connected ({len(profiles)} profiles: {profile_names})"
-            logger.info(
-                "Health check passed — %s",
-                message,
-                extra={"source_label": client.label},
-            )
-            self.update_service_status(service, True, message)
-            return True, message
-        except ArrClientError as exc:
-            message = str(exc)
-            logger.error(
-                "Health check FAILED — %s",
-                message,
-                extra={"source_label": client.label},
-            )
-            self.update_service_status(service, False, message)
-            return False, message
 
-    def _quality_text_matches(self, quality_name: str, target_quality: str) -> bool:
-        current = quality_name.strip().casefold()
-        target = target_quality.strip().casefold()
-        if not current or not target:
+# ─────────────────────────────────────────────────────────
+# ArrPoller — coordinator managing per-server runners
+# ─────────────────────────────────────────────────────────
+
+class ArrPoller:
+    def __init__(
+        self,
+        settings_store: SettingsStore,
+        change_log_store: ChangeLogStore,
+    ) -> None:
+        self.settings_store = settings_store
+        self.change_log_store = change_log_store
+        self.stats = PollStats()
+        self._runners: dict[str, ServerRunner] = {}
+        self._stopped = False
+
+    # ── Lifecycle ──
+
+    def start(self) -> None:
+        self._stopped = False
+        self.sync_runners()
+        logger.info("Poller started — %d runner(s)", len(self._runners))
+
+    def stop(self) -> None:
+        self._stopped = True
+        for runner in self._runners.values():
+            runner.stop()
+        logger.info("Poller stopped — all runners stopped")
+
+    def sync_runners(self) -> None:
+        """Reconcile running runners with current settings.
+
+        - Start runners for new/re-enabled servers.
+        - Stop runners for removed/disabled servers.
+        - Leave existing runners untouched (they re-read config each cycle).
+        """
+        if self._stopped:
+            return
+
+        settings = self.settings_store.load()
+        desired_names: set[str] = set()
+        for server in settings.servers:
+            if server.enabled:
+                desired_names.add(server.name)
+
+        # Stop runners that are no longer needed
+        for name in list(self._runners):
+            if name not in desired_names:
+                self._runners[name].stop()
+                del self._runners[name]
+                logger.info("Runner removed for '%s'", name)
+
+        # Start runners for servers that don't have one yet
+        for name in desired_names:
+            if name not in self._runners or not self._runners[name].is_alive():
+                runner = ServerRunner(name, self.settings_store, self.change_log_store)
+                runner.start()
+                self._runners[name] = runner
+
+    # ── Manual triggers ──
+
+    def run_all(self) -> None:
+        """Trigger an immediate poll on every active runner."""
+        for runner in list(self._runners.values()):
+            threading.Thread(target=runner.run_once, daemon=True).start()
+
+    def run_server(self, server_name: str) -> bool:
+        """Trigger an immediate poll on a specific runner. Returns False if not found."""
+        runner = self._runners.get(server_name)
+        if not runner:
             return False
-        return target in current
+        threading.Thread(target=runner.run_once, daemon=True).start()
+        return True
 
-    def _radarr_quality_name(self, item: dict[str, object]) -> str:
-        movie_file = item.get("movieFile")
-        if not isinstance(movie_file, dict):
-            return ""
-        quality = movie_file.get("quality")
-        if not isinstance(quality, dict):
-            return ""
-        quality_detail = quality.get("quality")
-        if not isinstance(quality_detail, dict):
-            return ""
-        name = quality_detail.get("name")
-        return str(name).strip() if isinstance(name, str) else ""
+    # ── Aggregated status ──
 
-    def _sonarr_episode_quality_name(self, episode_file: dict[str, object]) -> str:
-        quality = episode_file.get("quality")
-        if not isinstance(quality, dict):
-            return ""
-        quality_detail = quality.get("quality")
-        if not isinstance(quality_detail, dict):
-            return ""
-        name = quality_detail.get("name")
-        return name.strip() if isinstance(name, str) else ""
+    def status_payload(self) -> dict[str, object]:
+        self._aggregate_stats()
+        return {
+            "last_run": self.stats.last_run,
+            "last_error": self.stats.last_error,
+            "last_unmonitored": self.stats.last_unmonitored,
+            "recent_runs": list(self.stats.recent_runs),
+            "recent_changes": self.change_log_store.recent(200),
+            "service_status": self.stats.service_status,
+        }
 
-    def _log_sonarr_episode_change(
-        self,
-        episode: dict[str, object],
-        series_id: int,
-        *,
-        server_name: str = "Sonarr",
-        series_title: str = "",
-        quality_name: str = "",
-        link_url: str = "",
-    ) -> None:
-        season = episode.get("seasonNumber")
-        episode_number = episode.get("episodeNumber")
-        title = episode.get("title")
-        label = f"Series {series_id}"
-        if isinstance(season, int) and isinstance(episode_number, int):
-            label = f"S{season:02d}E{episode_number:02d}"
-        if isinstance(title, str) and title.strip():
-            label = f"{label} - {title.strip()}"
-        self.change_log_store.append(
-            {
-                "service": server_name,
-                "series_title": series_title,
-                "item_id": episode.get("id"),
-                "title": label,
-                "quality": quality_name,
-                "action": "Unmonitored episode",
-                "link_url": link_url,
-            }
-        )
+    def _aggregate_stats(self) -> None:
+        """Build aggregated stats from all runners."""
+        last_run: float | None = None
+        errors: list[str] = []
+        unmonitored: dict[str, int] = {}
+        service_status: dict[str, dict[str, object]] = {}
+        all_runs: list[dict[str, object]] = []
 
-    def _log_change(
-        self,
-        server_name: str,
-        item: dict[str, object],
-        *,
-        quality_name: str = "",
-        link_url: str = "",
-    ) -> None:
-        title = item.get("title") or item.get("sortTitle") or "Unknown"
-        year = item.get("year", "")
-        display_title = f"{title} ({year})" if year else str(title)
-        self.change_log_store.append(
-            {
-                "service": server_name,
-                "item_id": item.get("id"),
-                "title": display_title,
-                "quality": quality_name,
-                "action": "Unmonitored movie",
-                "link_url": link_url,
-            }
-        )
+        for name, runner in self._runners.items():
+            if runner.last_run is not None:
+                if last_run is None or runner.last_run > last_run:
+                    last_run = runner.last_run
+            if runner.last_error:
+                errors.append(f"{name}: {runner.last_error}")
+            unmonitored[name] = runner.last_unmonitored_count
+            if runner.service_status:
+                service_status[name] = runner.service_status
+            all_runs.extend(runner.recent_runs)
+
+        # Sort all runs by started_at descending, keep last 25
+        all_runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
+
+        self.stats.last_run = last_run
+        self.stats.last_error = " | ".join(errors)
+        self.stats.last_unmonitored = unmonitored
+        self.stats.recent_runs = deque(all_runs[:25], maxlen=25)
+        self.stats.service_status = service_status
+
+    def clear_history(self) -> None:
+        for runner in self._runners.values():
+            runner.recent_runs.clear()
+        self.stats.recent_runs.clear()
+
+    def is_running(self) -> bool:
+        return any(r.is_running() for r in self._runners.values())
+
+    def is_stopped(self) -> bool:
+        return self._stopped
+
+    def update_service_status(self, service: str, ok: bool, message: str) -> None:
+        """Update status for a server (used by test endpoint)."""
+        runner = self._runners.get(service)
+        if runner:
+            runner.service_status = {"ok": ok, "message": message, "checked_at": time.time()}
+        self.stats.service_status[service] = {
+            "ok": ok,
+            "message": message,
+            "checked_at": time.time(),
+        }
+
+    def get_runner(self, server_name: str) -> ServerRunner | None:
+        return self._runners.get(server_name)
+
+    @property
+    def runner_names(self) -> list[str]:
+        return list(self._runners.keys())
+
+
+# ─────────────────────────────────────────────────────────
+# Shared helpers (module-level, used by ServerRunner)
+# ─────────────────────────────────────────────────────────
+
+def _quality_text_matches(quality_name: str, target_quality: str) -> bool:
+    current = quality_name.strip().casefold()
+    target = target_quality.strip().casefold()
+    if not current or not target:
+        return False
+    return target in current
+
+
+def _radarr_quality_name(item: dict[str, object]) -> str:
+    movie_file = item.get("movieFile")
+    if not isinstance(movie_file, dict):
+        return ""
+    quality = movie_file.get("quality")
+    if not isinstance(quality, dict):
+        return ""
+    quality_detail = quality.get("quality")
+    if not isinstance(quality_detail, dict):
+        return ""
+    name = quality_detail.get("name")
+    return str(name).strip() if isinstance(name, str) else ""
+
+
+def _sonarr_episode_quality_name(episode_file: dict[str, object]) -> str:
+    quality = episode_file.get("quality")
+    if not isinstance(quality, dict):
+        return ""
+    quality_detail = quality.get("quality")
+    if not isinstance(quality_detail, dict):
+        return ""
+    name = quality_detail.get("name")
+    return name.strip() if isinstance(name, str) else ""
+
+
+def _log_sonarr_episode_change(
+    store: ChangeLogStore,
+    episode: dict[str, object],
+    series_id: int,
+    *,
+    server_name: str = "Sonarr",
+    series_title: str = "",
+    quality_name: str = "",
+    link_url: str = "",
+) -> None:
+    season = episode.get("seasonNumber")
+    episode_number = episode.get("episodeNumber")
+    title = episode.get("title")
+    label = f"Series {series_id}"
+    if isinstance(season, int) and isinstance(episode_number, int):
+        label = f"S{season:02d}E{episode_number:02d}"
+    if isinstance(title, str) and title.strip():
+        label = f"{label} - {title.strip()}"
+    store.append(
+        {
+            "service": server_name,
+            "series_title": series_title,
+            "item_id": episode.get("id"),
+            "title": label,
+            "quality": quality_name,
+            "action": "Unmonitored episode",
+            "link_url": link_url,
+        }
+    )
+
+
+def _log_change(
+    store: ChangeLogStore,
+    server_name: str,
+    item: dict[str, object],
+    *,
+    quality_name: str = "",
+    link_url: str = "",
+) -> None:
+    title = item.get("title") or item.get("sortTitle") or "Unknown"
+    year = item.get("year", "")
+    display_title = f"{title} ({year})" if year else str(title)
+    store.append(
+        {
+            "service": server_name,
+            "item_id": item.get("id"),
+            "title": display_title,
+            "quality": quality_name,
+            "action": "Unmonitored movie",
+            "link_url": link_url,
+        }
+    )

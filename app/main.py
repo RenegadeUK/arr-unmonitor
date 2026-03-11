@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import threading
 from datetime import datetime
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
@@ -60,8 +59,13 @@ def create_app() -> Flask:
     _seed_servers_from_env(initial_settings, settings_store)
 
     poller = ArrPoller(settings_store, change_log_store)
-    poller.start()
-    logger.info("Application started — poller running, UI on port %s", os.getenv("PORT", "5200"))
+
+    # Only start the poller in the actual serving process:
+    # - Flask debug/reloader: only the child process has WERKZEUG_RUN_MAIN=true
+    # - Production (no reloader): always start
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+        poller.start()
+        logger.info("Application started — poller running, UI on port %s", os.getenv("PORT", "5200"))
 
     # ──────────────────────────────────────────────────────
     # Pages
@@ -107,6 +111,7 @@ def create_app() -> Flask:
         settings = settings_store.load()
         servers = []
         for s in settings.servers:
+            runner = poller.get_runner(s.name)
             servers.append({
                 "name": s.name,
                 "type": s.type,
@@ -118,6 +123,8 @@ def create_app() -> Flask:
                 "stop_mode": s.stop_mode,
                 "profile_id": s.profile_id,
                 "enabled": s.enabled,
+                "poll_interval_seconds": s.poll_interval_seconds,
+                "runner_active": runner is not None and runner.is_alive() if runner else False,
                 "status": poller.stats.service_status.get(s.name, {
                     "ok": None, "message": "Not checked yet", "checked_at": None,
                 }),
@@ -139,6 +146,7 @@ def create_app() -> Flask:
         if settings.get_server_by_name(name):
             return jsonify({"error": f"A server named '{name}' already exists"}), 409
 
+        raw_interval = data.get("poll_interval_seconds")
         server = ServerConfig(
             name=name,
             type=server_type,
@@ -148,9 +156,11 @@ def create_app() -> Flask:
             profile_name=str(data.get("profile_name", "")).strip(),
             stop_mode=str(data.get("stop_mode", "cutoff")).strip() or "cutoff",
             enabled=bool(data.get("enabled", True)),
+            poll_interval_seconds=max(int(raw_interval), 30) if raw_interval else None,
         )
         settings.servers.append(server)
         settings_store.save(settings)
+        poller.sync_runners()
         logger.info("Server '%s' (%s) added", name, server_type)
         return jsonify({"ok": True, "message": f"Server '{name}' added"}), 201
 
@@ -181,8 +191,16 @@ def create_app() -> Flask:
         server.enabled = bool(data.get("enabled", server.enabled))
         # Reset profile_id when profile_name changes
         server.profile_id = None
+        # Per-server poll interval (null = use global)
+        raw_interval = data.get("poll_interval_seconds")
+        if raw_interval is not None:
+            server.poll_interval_seconds = max(int(raw_interval), 30) if raw_interval else None
+        else:
+            # Keep existing value if not provided in the request
+            pass
 
         settings_store.save(settings)
+        poller.sync_runners()
         logger.info("Server '%s' updated", new_name)
         return jsonify({"ok": True, "message": f"Server '{new_name}' updated"})
 
@@ -195,6 +213,7 @@ def create_app() -> Flask:
 
         settings.servers.remove(server)
         settings_store.save(settings)
+        poller.sync_runners()
         # Clean up service status
         poller.stats.service_status.pop(name, None)
         poller.stats.last_unmonitored.pop(name, None)
@@ -248,8 +267,14 @@ def create_app() -> Flask:
 
     @app.post("/run-now")
     def run_now():
-        threading.Thread(target=poller.run_once, daemon=True).start()
+        poller.run_all()
         return redirect(url_for("index", notice="Manual run started"))
+
+    @app.post("/run-now/<server_name>")
+    def run_now_server(server_name: str):
+        if poller.run_server(server_name):
+            return redirect(url_for("index", notice=f"Manual run started for {server_name}"))
+        return redirect(url_for("index", error=f"No active runner for '{server_name}'"))
 
     @app.post("/stop-worker")
     def stop_worker():
@@ -311,9 +336,17 @@ def create_app() -> Flask:
         now = datetime.now().timestamp()
         next_run_at: float | None = None
         seconds_until_next_run: int | None = None
-        if settings.enabled and poller.stats.last_run:
-            next_run_at = poller.stats.last_run + max(int(settings.poll_interval_seconds), 30)
-            seconds_until_next_run = max(int(next_run_at - now), 0)
+        if settings.enabled:
+            # Find the earliest next run across all runners
+            for s in settings.servers:
+                runner = poller.get_runner(s.name)
+                if runner and runner.last_run and s.enabled:
+                    runner_interval = runner._effective_interval(settings)
+                    runner_next = runner.last_run + runner_interval
+                    if next_run_at is None or runner_next < next_run_at:
+                        next_run_at = runner_next
+            if next_run_at is not None:
+                seconds_until_next_run = max(int(next_run_at - now), 0)
 
         health_state = "healthy"
         if poller.is_stopped():
@@ -330,15 +363,34 @@ def create_app() -> Flask:
 
         payload["servers"] = []
         for s in settings.servers:
+            runner = poller.get_runner(s.name)
             srv_status = poller.stats.service_status.get(s.name, {
                 "ok": None, "message": "Not checked yet", "checked_at": None,
             })
+            runner_info = {}
+            if runner:
+                runner_interval = runner._effective_interval(settings)
+                next_run_for_server: float | None = None
+                secs_until: int | None = None
+                if runner.last_run and s.enabled:
+                    next_run_for_server = runner.last_run + runner_interval
+                    secs_until = max(int(next_run_for_server - now), 0)
+                runner_info = {
+                    "runner_active": runner.is_alive(),
+                    "runner_running": runner.is_running(),
+                    "poll_interval_seconds": runner_interval,
+                    "last_run": runner.last_run,
+                    "last_error": runner.last_error,
+                    "next_run_at": next_run_for_server,
+                    "seconds_until_next_run": secs_until,
+                }
             payload["servers"].append({
                 "name": s.name,
                 "type": s.type,
                 "enabled": s.enabled,
                 "status": srv_status,
                 "last_unmonitored": poller.stats.last_unmonitored.get(s.name, 0),
+                **runner_info,
             })
 
         # Legacy compat: keep service_status as a flat dict

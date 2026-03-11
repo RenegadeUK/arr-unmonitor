@@ -25,6 +25,7 @@ class ServerConfig:
     stop_mode: str = "cutoff"
     profile_id: int | None = None
     enabled: bool = True
+    poll_interval_seconds: int | None = None  # None = use global default
 
 
 @dataclass
@@ -76,6 +77,7 @@ class SettingsStore:
         for srv in raw.get("servers", []):
             if not isinstance(srv, dict):
                 continue
+            raw_interval = srv.get("poll_interval_seconds")
             servers.append(
                 ServerConfig(
                     name=str(srv.get("name", "")).strip(),
@@ -87,6 +89,7 @@ class SettingsStore:
                     stop_mode=str(srv.get("stop_mode", "cutoff")).strip() or "cutoff",
                     profile_id=srv.get("profile_id"),
                     enabled=bool(srv.get("enabled", True)),
+                    poll_interval_seconds=int(raw_interval) if raw_interval is not None else None,
                 )
             )
         return AppSettings(
