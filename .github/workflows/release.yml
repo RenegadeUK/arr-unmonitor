@@ -44,8 +44,6 @@ jobs:
             docker.io/blackduke/arr-unmonitor
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             type=raw,value=latest
           labels: |
             net.unraid.docker.webui=http://[IP]:[PORT:5200]/

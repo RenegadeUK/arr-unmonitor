@@ -46,7 +46,6 @@ jobs:
             docker.io/blackduke/arr-unmonitor
           tags: |
             type=ref,event=branch
-            type=sha
           labels: |
             net.unraid.docker.webui=http://[IP]:[PORT:5200]/
             net.unraid.docker.icon=https://raw.githubusercontent.com/RenegadeUK/arr-unmonitor/main/app/static/favicon.svg
