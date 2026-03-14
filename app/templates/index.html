@@ -605,7 +605,7 @@
             <div class="dash-card-stat"><span>URL</span><span class="stat-value" style="font-size:0.85rem;color:#9ca3af;">${escapeHtml(s.url || 'Not set')}</span></div>
             <div class="dash-card-stat"><span>Poll Interval</span><span class="stat-value">${s.poll_interval_seconds ? s.poll_interval_seconds + 's' : 'Global'}</span></div>
             <div class="dash-card-stat"><span>Next Run</span><span class="stat-value" id="dash-next-${escapeHtml(s.name)}">${s.seconds_until_next_run != null ? formatCountdown(s.seconds_until_next_run) : '--'}</span></div>
-            <div class="dash-card-stat"><span>Last Unmonitored</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">${s.last_unmonitored ?? '--'}</span></div>
+            <div class="dash-card-stat"><span>Unmonitored Today</span><span class="stat-value" id="dash-unmon-${escapeHtml(s.name)}">${s.unmonitored_today ?? 0}</span></div>
             <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
               <button onclick="runServerNow('${escapeHtml(s.name)}')" style="font-size:0.82rem;">Run Now</button>
               <a href="#settings" onclick="switchTab('settings');" style="font-size:0.85rem;">Edit in Settings</a>

@@ -87,16 +87,43 @@ class ServerRunner:
     # ── Main loop ──
 
     def _loop(self) -> None:
-        while not self._stop.is_set():
-            settings = self.settings_store.load()
-            if settings.enabled:
-                self.run_once()
-            else:
-                logger.debug(
-                    "Global polling disabled — runner '%s' sleeping", self.server_name,
-                )
-            interval = self._effective_interval(settings)
-            self._stop.wait(interval)
+        try:
+            while not self._stop.is_set():
+                try:
+                    settings = self.settings_store.load()
+                except Exception as exc:
+                    logger.error(
+                        "Runner '%s' failed to load settings: %s — retrying in 60s",
+                        self.server_name, exc,
+                    )
+                    self.last_error = f"Failed to load settings: {exc}"
+                    self.service_status = {
+                        "ok": False,
+                        "message": f"Settings load error: {exc}",
+                        "checked_at": time.time(),
+                    }
+                    self._stop.wait(60)
+                    continue
+
+                if settings.enabled:
+                    self.run_once()
+                else:
+                    logger.debug(
+                        "Global polling disabled — runner '%s' sleeping", self.server_name,
+                    )
+                interval = self._effective_interval(settings)
+                self._stop.wait(interval)
+        except Exception as exc:
+            logger.error(
+                "Runner '%s' loop crashed unexpectedly: %s",
+                self.server_name, exc, exc_info=True,
+            )
+            self.last_error = f"Runner crashed: {exc}"
+            self.service_status = {
+                "ok": False,
+                "message": f"Runner crashed: {exc}",
+                "checked_at": time.time(),
+            }
 
     def _effective_interval(self, settings: AppSettings) -> int:
         server = settings.get_server_by_name(self.server_name)
@@ -886,7 +913,7 @@ class ArrPoller:
 
         - Start runners for new/re-enabled servers.
         - Stop runners for removed/disabled servers.
-        - Leave existing runners untouched (they re-read config each cycle).
+        - Restart runners whose threads have died.
         """
         if self._stopped:
             return
@@ -904,9 +931,14 @@ class ArrPoller:
                 del self._runners[name]
                 logger.info("Runner removed for '%s'", name)
 
-        # Start runners for servers that don't have one yet
+        # Start runners for servers that don't have one yet, or restart dead ones
         for name in desired_names:
-            if name not in self._runners or not self._runners[name].is_alive():
+            existing = self._runners.get(name)
+            if existing and not existing.is_alive():
+                logger.warning(
+                    "Runner thread for '%s' died — restarting", name,
+                )
+            if not existing or not existing.is_alive():
                 runner = ServerRunner(name, self.settings_store, self.change_log_store)
                 runner.start()
                 self._runners[name] = runner
@@ -998,6 +1030,16 @@ class ArrPoller:
     # ── Aggregated status ──
 
     def status_payload(self) -> dict[str, object]:
+        # Auto-recover dead runner threads on status check
+        if not self._stopped:
+            for name, runner in list(self._runners.items()):
+                if not runner.is_alive():
+                    logger.warning(
+                        "Detected dead runner thread for '%s' during status check — restarting",
+                        name,
+                    )
+                    self.sync_runners()
+                    break
         self._aggregate_stats()
         return {
             "last_run": self.stats.last_run,
@@ -1022,9 +1064,19 @@ class ArrPoller:
                     last_run = runner.last_run
             if runner.last_error:
                 errors.append(f"{name}: {runner.last_error}")
-            unmonitored[name] = runner.last_unmonitored_count
-            if runner.service_status:
+            # Detect dead runner threads and report them
+            if not runner.is_alive() and not self._stopped:
+                dead_msg = f"Runner thread died unexpectedly"
+                if not runner.last_error:
+                    errors.append(f"{name}: {dead_msg}")
+                service_status[name] = runner.service_status or {
+                    "ok": False,
+                    "message": dead_msg,
+                    "checked_at": time.time(),
+                }
+            elif runner.service_status:
                 service_status[name] = runner.service_status
+            unmonitored[name] = runner.last_unmonitored_count
             all_runs.extend(runner.recent_runs)
 
         # Sort all runs by started_at descending, keep last 25

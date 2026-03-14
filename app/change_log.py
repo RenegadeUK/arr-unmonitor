@@ -70,3 +70,28 @@ class ChangeLogStore:
                     if isinstance(timestamp, (int, float)) and float(timestamp) >= since_timestamp:
                         count += 1
         return count
+
+    def count_since_by_server(self, since_timestamp: float) -> dict[str, int]:
+        """Return {server_name: count} of changes since a timestamp."""
+        if not self.path.exists():
+            return {}
+
+        counts: dict[str, int] = {}
+        with self._lock:
+            with self.path.open("r", encoding="utf-8") as file:
+                for line in file:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    timestamp = payload.get("timestamp")
+                    if isinstance(timestamp, (int, float)) and float(timestamp) >= since_timestamp:
+                        service = payload.get("service", "")
+                        if service:
+                            counts[service] = counts.get(service, 0) + 1
+        return counts
