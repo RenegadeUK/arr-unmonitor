@@ -80,16 +80,57 @@ docker compose up -d --build
 | `GET` | `/status` | Full runtime status (JSON) |
 | `GET` | `/health` | Health check |
 
-## GHCR Auto Build on Push
+## Docker Images
 
-Workflow file: `.github/workflows/ghcr.yml`
+Images are published to both **DockerHub** and **GHCR**:
 
-On every push, GitHub Actions will:
+| Registry | Image |
+|----------|-------|
+| DockerHub | `blackduke/arr-unmonitor` |
+| GHCR | `ghcr.io/renegadeuk/arr-unmonitor` |
+
+All builds are multi-arch (`linux/amd64`, `linux/arm64`).
+
+### Image Tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest stable release |
+| `1.0.0` / `1.0` / `1` | Specific semver release |
+| `development` | Latest development branch build |
+| `main` | Latest main branch build |
+| `sha-abc1234` | Specific commit build |
+
+## CI/CD Pipeline
+
+### Branch Builds (CI)
+
+Workflow: `.github/workflows/ci.yml`
+
+On every push to any branch, GitHub Actions will:
 
 - Build multi-arch image (`linux/amd64`, `linux/arm64`)
-- Push to `ghcr.io/<owner>/<repo>`
+- Push to both DockerHub and GHCR
+- Tag with branch name and commit SHA
 
-Image tags include branch/tag refs and commit SHA.
+### Releases
+
+Workflow: `.github/workflows/release.yml`
+
+To create a release:
+
+```bash
+git tag v1.0.0
+git push --tags
+```
+
+This will:
+
+- Build multi-arch image
+- Push to both DockerHub and GHCR with semver tags (`1.0.0`, `1.0`, `1`, `latest`)
+- Create a GitHub Release with auto-generated release notes
+
+Pre-release tags (e.g. `v1.0.0-rc1`, `v1.0.0-beta1`) are marked as pre-releases on GitHub.
 
 ## Troubleshooting
 

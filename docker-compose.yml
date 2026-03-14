@@ -1,6 +1,7 @@
 services:
   arr-unmonitor:
-    build: .
+    image: blackduke/arr-unmonitor:latest
+    # build: .  # uncomment for local development
     container_name: arr-unmonitor
     ports:
       - "5200:5200"
