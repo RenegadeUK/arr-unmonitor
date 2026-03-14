@@ -261,6 +261,7 @@ def create_app() -> Flask:
             settings.enabled = bool(data["enabled"])
 
         settings_store.save(settings)
+        poller.sync_runners()
         return jsonify({"ok": True, "message": "Settings saved"})
 
     # ──────────────────────────────────────────────────────
