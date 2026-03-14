@@ -201,7 +201,7 @@
           <p class="error"><strong>Error:</strong> {{ error }}</p>
           {% endif %}
           <div id="paused-banner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:0.7rem 1rem;margin-top:0.5rem;color:#92400e;">
-            <strong>Polling is paused.</strong> Global polling is disabled. Go to <a href="#settings" onclick="switchTab('settings');" style="color:#92400e;text-decoration:underline;">Settings</a> and set <em>Polling Enabled</em> to <strong>Yes</strong> to resume.
+            <strong>Polling is disabled.</strong> Go to <a href="#settings" onclick="switchTab('settings');" style="color:#92400e;text-decoration:underline;">Settings</a> and set <em>Polling Enabled</em> to <strong>Yes</strong> to resume.
           </div>
         </div>
 
@@ -518,7 +518,7 @@
         const el = document.getElementById('health-badge');
         if (!el) return;
         el.classList.remove('badge-ok', 'badge-bad', 'badge-unknown');
-        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], paused: ['badge-unknown','Paused'], stopped: ['badge-bad','Stopped'], error: ['badge-bad','Error'] };
+        const map = { healthy: ['badge-ok','Healthy'], running: ['badge-unknown','Running'], disabled: ['badge-unknown','Polling Disabled'], paused: ['badge-unknown','Paused'], stopped: ['badge-bad','Stopped'], error: ['badge-bad','Error'] };
         const e = map[state] || ['badge-unknown', 'Unknown'];
         el.classList.add(e[0]); el.textContent = e[1];
       }
@@ -540,7 +540,7 @@
         // Show/hide paused banner
         const pausedBanner = document.getElementById('paused-banner');
         if (pausedBanner) {
-          pausedBanner.style.display = runtime?.health_state === 'paused' ? '' : 'none';
+          pausedBanner.style.display = runtime?.health_state === 'disabled' ? '' : 'none';
         }
 
         const countdown = document.getElementById('next-run-countdown');

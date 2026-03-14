@@ -409,7 +409,7 @@ def create_app() -> Flask:
         elif poller.is_running():
             health_state = "running"
         elif not settings.enabled:
-            health_state = "paused"
+            health_state = "disabled"
         else:
             # Fallback: detect dead runners or overdue polls even if _aggregate_stats missed them
             any_enabled = any(s.enabled for s in settings.servers)
