@@ -65,7 +65,12 @@ def create_app() -> Flask:
     # - Production (no reloader): always start
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
         poller.start()
-        logger.info("Application started — poller running, UI on port %s", os.getenv("PORT", "5200"))
+        logger.info(
+            "Application started — poller running, global_polling_enabled=%s, servers=%d, UI on port %s",
+            initial_settings.enabled,
+            len(initial_settings.servers),
+            os.getenv("PORT", "5200"),
+        )
 
     # ──────────────────────────────────────────────────────
     # Pages
@@ -405,6 +410,22 @@ def create_app() -> Flask:
             health_state = "running"
         elif not settings.enabled:
             health_state = "paused"
+        else:
+            # Fallback: detect dead runners or overdue polls even if _aggregate_stats missed them
+            any_enabled = any(s.enabled for s in settings.servers)
+            if any_enabled:
+                has_dead = any(
+                    not r.is_alive()
+                    for name, r in ((s.name, poller.get_runner(s.name)) for s in settings.servers if s.enabled)
+                    if r is not None
+                )
+                if has_dead:
+                    health_state = "error"
+                elif poller.stats.last_run:
+                    # Flag as error if polls are overdue (> 2x the global interval)
+                    overdue_threshold = settings.poll_interval_seconds * 2
+                    if now - poller.stats.last_run > overdue_threshold:
+                        health_state = "error"
 
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         unmonitored_today = change_log_store.count_since(today_start)

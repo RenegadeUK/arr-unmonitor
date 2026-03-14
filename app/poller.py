@@ -108,12 +108,12 @@ class ServerRunner:
                 if settings.enabled:
                     self.run_once()
                 else:
-                    logger.debug(
-                        "Global polling disabled — runner '%s' sleeping", self.server_name,
+                    logger.info(
+                        "Global polling disabled — runner '%s' skipping poll cycle", self.server_name,
                     )
                 interval = self._effective_interval(settings)
                 self._stop.wait(interval)
-        except Exception as exc:
+        except BaseException as exc:
             logger.error(
                 "Runner '%s' loop crashed unexpectedly: %s",
                 self.server_name, exc, exc_info=True,
@@ -894,19 +894,49 @@ class ArrPoller:
         self.stats = PollStats()
         self._runners: dict[str, ServerRunner] = {}
         self._stopped = False
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread: threading.Thread | None = None
 
     # ── Lifecycle ──
 
     def start(self) -> None:
         self._stopped = False
         self.sync_runners()
+        self._start_watchdog()
         logger.info("Poller started — %d runner(s)", len(self._runners))
 
     def stop(self) -> None:
         self._stopped = True
+        self._watchdog_stop.set()
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=5)
         for runner in self._runners.values():
             runner.stop()
         logger.info("Poller stopped — all runners stopped")
+
+    def _start_watchdog(self) -> None:
+        """Start a background watchdog that periodically checks and restarts dead runners."""
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop, daemon=True, name="runner-watchdog",
+        )
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self) -> None:
+        """Periodically check runner health and restart dead threads."""
+        while not self._watchdog_stop.is_set():
+            self._watchdog_stop.wait(60)  # Check every 60 seconds
+            if self._watchdog_stop.is_set():
+                break
+            if self._stopped:
+                continue
+            for name, runner in list(self._runners.items()):
+                if not runner.is_alive():
+                    logger.warning(
+                        "Watchdog detected dead runner '%s' — triggering restart", name,
+                    )
+                    self.sync_runners()
+                    break
 
     def sync_runners(self) -> None:
         """Reconcile running runners with current settings.
@@ -1030,7 +1060,9 @@ class ArrPoller:
     # ── Aggregated status ──
 
     def status_payload(self) -> dict[str, object]:
-        # Auto-recover dead runner threads on status check
+        # Aggregate stats FIRST so dead runner errors are captured before restart
+        self._aggregate_stats()
+        # Then auto-recover dead runner threads
         if not self._stopped:
             for name, runner in list(self._runners.items()):
                 if not runner.is_alive():
@@ -1040,7 +1072,6 @@ class ArrPoller:
                     )
                     self.sync_runners()
                     break
-        self._aggregate_stats()
         return {
             "last_run": self.stats.last_run,
             "last_error": self.stats.last_error,

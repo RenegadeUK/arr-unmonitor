@@ -200,6 +200,9 @@
           {% if error %}
           <p class="error"><strong>Error:</strong> {{ error }}</p>
           {% endif %}
+          <div id="paused-banner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:0.7rem 1rem;margin-top:0.5rem;color:#92400e;">
+            <strong>Polling is paused.</strong> Global polling is disabled. Go to <a href="#settings" onclick="switchTab('settings');" style="color:#92400e;text-decoration:underline;">Settings</a> and set <em>Polling Enabled</em> to <strong>Yes</strong> to resume.
+          </div>
         </div>
 
         <!-- Dynamic server summary cards -->
@@ -533,6 +536,13 @@
         const today = document.getElementById('unmonitored-today');
         if (today) today.textContent = String(runtime?.unmonitored_today ?? 0);
         applyHealthBadge(runtime?.health_state);
+
+        // Show/hide paused banner
+        const pausedBanner = document.getElementById('paused-banner');
+        if (pausedBanner) {
+          pausedBanner.style.display = runtime?.health_state === 'paused' ? '' : 'none';
+        }
+
         const countdown = document.getElementById('next-run-countdown');
         if (countdown) countdown.textContent = runtime?.worker_stopped ? 'Stopped' : formatCountdown(runtimeState.seconds_until_next_run);
 
