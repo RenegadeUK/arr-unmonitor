@@ -96,22 +96,20 @@ All builds are multi-arch (`linux/amd64`, `linux/arm64`).
 | Tag | Description |
 |-----|-------------|
 | `latest` | Latest stable release |
-| `1.0.0` / `1.0` / `1` | Specific semver release |
+| `0.1.0` | Specific version release |
 | `development` | Latest development branch build |
-| `main` | Latest main branch build |
-| `sha-abc1234` | Specific commit build |
 
 ## CI/CD Pipeline
 
-### Branch Builds (CI)
+### Development Builds (CI)
 
 Workflow: `.github/workflows/ci.yml`
 
-On every push to any branch, GitHub Actions will:
+On every push to the `development` branch, GitHub Actions will:
 
 - Build multi-arch image (`linux/amd64`, `linux/arm64`)
 - Push to both DockerHub and GHCR
-- Tag with branch name and commit SHA
+- Tag as `development`
 
 ### Releases
 
