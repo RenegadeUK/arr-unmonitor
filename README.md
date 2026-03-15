@@ -1,6 +1,6 @@
 # arr-unmonitor
 
-Dockerized Python app that automatically unmonitors completed media items in Radarr and Sonarr once they reach a target quality.
+Automatically unmonitor completed movies and episodes in Radarr and Sonarr once they reach a target quality.
 
 ## Features
 
