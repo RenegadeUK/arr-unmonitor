@@ -94,7 +94,8 @@ arr-unmonitor/
 │   └── DEVELOPMENT.md       # This file
 ├── .github/
 │   └── workflows/
-│       └── ghcr.yml         # CI/CD: build & push to GHCR
+│       ├── ci.yml            # CI: build & push development images
+│       └── release.yml       # Release: build, push & create GitHub Release
 ├── docker-compose.yml       # Docker Compose service definition
 ├── Dockerfile               # Container image build
 ├── requirements.txt         # Python dependencies
@@ -118,6 +119,32 @@ arr-unmonitor/
 4. Verify the `/status` JSON endpoint reflects expected behaviour.
 5. Commit and push to `development`.
 6. Open a PR to `main` when ready.
+
+## Creating a Release
+
+1. Ensure `development` is tested and ready.
+2. Merge into `main` and push:
+   ```bash
+   git checkout main
+   git merge development
+   git push
+   ```
+3. Tag with a semver `v*` version and push the tag:
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+4. Switch back to `development`:
+   ```bash
+   git checkout development
+   ```
+
+The release workflow will automatically:
+- Build multi-arch Docker images (`linux/amd64`, `linux/arm64`)
+- Push to DockerHub (`blackduke/arr-unmonitor`) and GHCR (`ghcr.io/renegadeuk/arr-unmonitor`) with version + `latest` tags
+- Create a GitHub Release with auto-generated release notes
+
+Pre-release tags (e.g. `v1.0.0-rc1`, `v1.0.0-beta1`) are marked as pre-releases.
 
 ## Useful Endpoints for Development
 

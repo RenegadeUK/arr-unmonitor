@@ -118,14 +118,23 @@ Workflow: `.github/workflows/release.yml`
 To create a release:
 
 ```bash
-git tag v1.0.0
-git push --tags
+# 1. Merge development into main
+git checkout main
+git merge development
+git push
+
+# 2. Tag the release (use semver with v prefix)
+git tag v0.2.0
+git push origin v0.2.0
+
+# 3. Switch back to development
+git checkout development
 ```
 
-This will:
+This will automatically:
 
-- Build multi-arch image
-- Push to both DockerHub and GHCR with semver tags (`1.0.0`, `1.0`, `1`, `latest`)
+- Build multi-arch image (`linux/amd64`, `linux/arm64`)
+- Push to both DockerHub and GHCR with tags `0.2.0` and `latest`
 - Create a GitHub Release with auto-generated release notes
 
 Pre-release tags (e.g. `v1.0.0-rc1`, `v1.0.0-beta1`) are marked as pre-releases on GitHub.
