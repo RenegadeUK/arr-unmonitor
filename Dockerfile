@@ -20,4 +20,4 @@ VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5200/health')" || exit 1
 
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5200", "app.main:app"]
+CMD ["gunicorn", "-w", "1", "--threads", "2", "-k", "gthread", "--timeout", "120", "-b", "0.0.0.0:5200", "app.main:app"]
